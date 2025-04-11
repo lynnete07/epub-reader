@@ -1,0 +1,29 @@
+{
+  "name": "lightreader",
+  "version": "1.0.0",
+  "description": "轻量级在线EPUB电子书阅读器",
+  "main": "index.html",
+  "scripts": {
+    "start": "http-server -p 3000",
+    "build": "npm run clean && npm run copy-files && npm run minify-css && npm run minify-js",
+    "clean": "rimraf dist",
+    "copy-files": "mkdir -p dist && cp -r index.html favicon.ico manifest.json robots.txt sitemap.xml img dist/",
+    "minify-css": "cleancss -o dist/css/styles.min.css css/styles.css && cp dist/css/styles.min.css dist/css/styles.css",
+    "minify-js": "uglifyjs js/epub-reader.js -o dist/js/epub-reader.min.js && cp dist/js/epub-reader.min.js dist/js/epub-reader.js"
+  },
+  "keywords": [
+    "epub",
+    "reader",
+    "ebook",
+    "web",
+    "pwa"
+  ],
+  "author": "Yvonne",
+  "license": "MIT",
+  "devDependencies": {
+    "clean-css-cli": "^5.6.2",
+    "http-server": "^14.1.1",
+    "rimraf": "^3.0.2",
+    "uglify-js": "^3.17.4"
+  }
+} 

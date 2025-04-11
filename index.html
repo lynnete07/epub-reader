@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="LightReader - 轻量级在线EPUB电子书阅读器，提供简洁的阅读体验">
+    <meta name="keywords" content="EPUB, 电子书, 阅读器, 在线阅读, LightReader">
+    <meta name="author" content="Yvonne">
+    <meta name="theme-color" content="#333333">
+    <link rel="icon" href="favicon.ico" type="image/x-icon">
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="img/icon-192.png">
+    <title>LightReader - 轻量级EPUB阅读器</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .app-brand h1 {
+            font-weight: 300; /* 更纤细的字体 */
+            letter-spacing: 0.5px; /* 增加字母间距 */
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <header class="app-header">
+            <div class="app-brand">
+                <h1>✨ LightReader</h1>
+            </div>
+            <div class="settings">
+                <div class="settings-group">
+                    <button id="theme-toggle"><i class="fas fa-moon"></i></button>
+                    <button id="toc-button" disabled><i class="fas fa-list"></i></button>
+                    <button id="open-new-file" class="hidden"><i class="fas fa-book"></i></button>
+                    <div class="font-size-controls">
+                        <button id="font-decrease"><i class="fas fa-minus"></i></button>
+                        <button id="font-increase"><i class="fas fa-plus"></i></button>
+                    </div>
+                </div>
+            </div>
+        </header>
+        
+        <div class="main-content">
+            <div id="toc-container" class="toc-container hidden">
+                <div class="toc-header">
+                    <h2>📚 目录</h2>
+                </div>
+                <div id="toc-content"></div>
+            </div>
+            
+            <div id="overlay" class="overlay hidden"></div>
+            
+            <div id="drop-area" class="drop-area">
+                <div class="drop-content">
+                    <div class="welcome-icon">📖</div>
+                    <h2>欢迎使用 LightReader</h2>
+                    <p class="welcome-desc">一款可以使用「🧩浏览器插件」自由扩展的 EPUB 阅读器 ✨</p>
+                    
+                    <div class="upload-area">
+                        <p>将 EPUB 文件拖放到这里</p>
+                        <p>— 或 —</p>
+                        <input type="file" id="file-input" accept=".epub">
+                        <label for="file-input" class="file-input-label">选择文件</label>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="viewer" class="viewer hidden"></div>
+        </div>
+    </div>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="js/epub-reader.js"></script>
+</body>
+</html> 
