@@ -138,8 +138,11 @@ function openNewFile() {
         saveReadingProgress();
     }
     
-    // 直接在新窗口打开首页
-    window.open(location.pathname, '_blank');
+    // 获取基本URL（不带任何查询参数）
+    const baseUrl = window.location.origin + window.location.pathname;
+    
+    // 直接在新窗口打开不带参数的URL
+    window.open(baseUrl, '_blank');
 }
 
 // 初始化拖放区域事件
@@ -1137,13 +1140,21 @@ function handleWindowResize() {
 
 // 初始化应用
 function init() {
-    // 生成会话ID
-    sessionId = generateSessionId();
-    
-    // 添加会话ID到URL查询参数，用于识别当前会话
+    // 获取当前URL
     const currentUrl = new URL(window.location.href);
-    currentUrl.searchParams.set('sid', sessionId);
-    window.history.replaceState({}, '', currentUrl);
+    
+    // 只有在URL中没有sid参数时才生成新的会话ID
+    if (!currentUrl.searchParams.has('sid')) {
+        // 生成会话ID
+        sessionId = generateSessionId();
+        
+        // 添加会话ID到URL查询参数，用于识别当前会话
+        currentUrl.searchParams.set('sid', sessionId);
+        window.history.replaceState({}, '', currentUrl);
+    } else {
+        // 如果URL中已有会话ID，直接使用它
+        sessionId = currentUrl.searchParams.get('sid');
+    }
     
     // 加载设置
     loadSettings();
@@ -1327,10 +1338,41 @@ document.addEventListener('keydown', (e) => {
         viewer.classList.remove('hidden');
         dropArea.classList.add('hidden');
         
-        // 尝试恢复书籍
-        restoreBookFromId(bookFromHash).then(success => {
+        // 添加超时处理
+        const timeoutPromise = new Promise((resolve) => {
+            setTimeout(() => {
+                resolve({ timeout: true });
+            }, 10000); // 10秒超时
+        });
+        
+        // 竞态请求，看哪个先完成
+        Promise.race([
+            restoreBookFromId(bookFromHash),
+            timeoutPromise
+        ]).then(result => {
             isRestoringBook = false;
-            if (!success) {
+            
+            if (result && result.timeout) {
+                // 超时处理
+                console.log("恢复书籍超时");
+                viewer.innerHTML = `
+                    <div class="error-message">
+                        <h3>📶 加载失败</h3>
+                        <p>您的书籍加载超时，可能是由于网络连接问题。</p>
+                        <p>建议:</p>
+                        <ul>
+                            <li>检查您的网络连接</li>
+                            <li>如果您在中国大陆访问，网络可能不稳定</li>
+                            <li>尝试刷新页面或上传新的EPUB文件</li>
+                        </ul>
+                        <button class="retry-button" onclick="location.reload()">刷新页面</button>
+                        <button class="upload-new-button" onclick="dropArea.classList.remove('hidden'); viewer.classList.add('hidden');">上传新文件</button>
+                    </div>
+                `;
+                return false;
+            }
+            
+            if (!result) {
                 console.log("从哈希恢复书籍失败");
                 
                 // 恢复失败，回到首页
