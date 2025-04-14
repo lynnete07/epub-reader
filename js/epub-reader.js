@@ -138,12 +138,33 @@ function openNewFile() {
         saveReadingProgress();
     }
     
-    // 生成新的会话ID
-    const newSessionId = generateSessionId();
+    // 清理当前状态
+    book = null;
+    currentChapter = 0;
+    chapters = [];
+    toc = [];
+    bookTitle = '';
+    currentBookPath = '';
     
-    // 打开新窗口，包含新的会话ID参数和清除的哈希
-    const baseUrl = window.location.href.split('#')[0].split('?')[0];
-    window.open(`${baseUrl}?sid=${newSessionId}`, '_blank');
+    // 隐藏阅读器，显示上传区域
+    viewer.classList.add('hidden');
+    dropArea.classList.remove('hidden');
+    tocContainer.classList.add('hidden');
+    tocButton.disabled = true;
+    openNewFileBtn.classList.add('hidden');
+    
+    // 重置URL哈希，避免刷新时恢复到之前的书籍
+    resetUrlHash();
+    
+    // 清除阅读器内容
+    viewer.innerHTML = '';
+    tocContent.innerHTML = '';
+    
+    // 重置会话ID
+    sessionId = generateSessionId();
+    const currentUrl = new URL(window.location.href);
+    currentUrl.searchParams.set('sid', sessionId);
+    window.history.replaceState({}, '', currentUrl);
 }
 
 // 初始化拖放区域事件
