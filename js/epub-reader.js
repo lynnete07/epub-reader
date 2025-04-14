@@ -138,11 +138,11 @@ function openNewFile() {
         saveReadingProgress();
     }
     
-    // 获取基本URL（不带任何查询参数）
-    const baseUrl = window.location.origin + window.location.pathname;
+    // 获取完整的基本URL（使用完整绝对URL，确保使用当前完整域名）
+    const currentHost = window.location.origin;
     
-    // 直接在新窗口打开不带参数的URL
-    window.open(baseUrl, '_blank');
+    // 直接在新窗口打开完整的URL
+    window.open(currentHost, '_blank');
 }
 
 // 初始化拖放区域事件
