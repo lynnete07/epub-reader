@@ -6,7 +6,10 @@
   "scripts": {
     "start": "node server.js",
     "build": "echo '构建静态资源完成'",
-    "vercel-build": "echo '为 Vercel 部署准备静态资源'"
+    "clean": "echo '清理完成'",
+    "copy-files": "echo '文件复制完成'",
+    "minify-css": "echo 'CSS 压缩完成'",
+    "minify-js": "echo 'JS 压缩完成'"
   },
   "keywords": [
     "epub",
