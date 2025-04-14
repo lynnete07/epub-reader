@@ -138,33 +138,89 @@ function openNewFile() {
         saveReadingProgress();
     }
     
-    // 清理当前状态
-    book = null;
-    currentChapter = 0;
-    chapters = [];
-    toc = [];
-    bookTitle = '';
-    currentBookPath = '';
+    // 生成新的会话ID
+    const newSessionId = generateSessionId();
     
-    // 隐藏阅读器，显示上传区域
-    viewer.classList.add('hidden');
-    dropArea.classList.remove('hidden');
-    tocContainer.classList.add('hidden');
-    tocButton.disabled = true;
-    openNewFileBtn.classList.add('hidden');
+    // 构建新窗口URL
+    const baseUrl = window.location.href.split('#')[0].split('?')[0];
+    const newUrl = `${baseUrl}?sid=${newSessionId}`;
     
-    // 重置URL哈希，避免刷新时恢复到之前的书籍
-    resetUrlHash();
+    // 创建一个临时按钮，用户点击后打开新窗口
+    // 这样可以避免被浏览器的弹窗拦截器阻止
+    const tempButton = document.createElement('button');
+    tempButton.textContent = '打开新页面';
+    tempButton.style.position = 'fixed';
+    tempButton.style.top = '50%';
+    tempButton.style.left = '50%';
+    tempButton.style.transform = 'translate(-50%, -50%)';
+    tempButton.style.zIndex = '1000';
+    tempButton.style.padding = '10px 20px';
+    tempButton.style.backgroundColor = 'var(--button-color)';
+    tempButton.style.color = 'white';
+    tempButton.style.border = 'none';
+    tempButton.style.borderRadius = '4px';
+    tempButton.style.cursor = 'pointer';
+    tempButton.style.fontSize = '16px';
     
-    // 清除阅读器内容
-    viewer.innerHTML = '';
-    tocContent.innerHTML = '';
+    // 创建一个遮罩层
+    const tempOverlay = document.createElement('div');
+    tempOverlay.style.position = 'fixed';
+    tempOverlay.style.top = '0';
+    tempOverlay.style.left = '0';
+    tempOverlay.style.right = '0';
+    tempOverlay.style.bottom = '0';
+    tempOverlay.style.backgroundColor = 'rgba(0,0,0,0.7)';
+    tempOverlay.style.zIndex = '999';
+    tempOverlay.style.display = 'flex';
+    tempOverlay.style.justifyContent = 'center';
+    tempOverlay.style.alignItems = 'center';
     
-    // 重置会话ID
-    sessionId = generateSessionId();
-    const currentUrl = new URL(window.location.href);
-    currentUrl.searchParams.set('sid', sessionId);
-    window.history.replaceState({}, '', currentUrl);
+    // 添加说明文本
+    const tempText = document.createElement('div');
+    tempText.textContent = '点击下方按钮打开新的阅读页面';
+    tempText.style.color = 'white';
+    tempText.style.textAlign = 'center';
+    tempText.style.marginBottom = '20px';
+    tempText.style.fontSize = '16px';
+    
+    // 创建一个容器
+    const tempContainer = document.createElement('div');
+    tempContainer.style.display = 'flex';
+    tempContainer.style.flexDirection = 'column';
+    tempContainer.style.alignItems = 'center';
+    
+    // 添加点击事件处理程序
+    tempButton.addEventListener('click', () => {
+        // 移除临时元素
+        document.body.removeChild(tempOverlay);
+        
+        // 打开新窗口
+        window.open(newUrl, '_blank');
+    });
+    
+    // 添加关闭按钮
+    const closeButton = document.createElement('button');
+    closeButton.textContent = '取消';
+    closeButton.style.marginTop = '10px';
+    closeButton.style.padding = '8px 16px';
+    closeButton.style.backgroundColor = 'transparent';
+    closeButton.style.color = 'white';
+    closeButton.style.border = '1px solid white';
+    closeButton.style.borderRadius = '4px';
+    closeButton.style.cursor = 'pointer';
+    
+    closeButton.addEventListener('click', () => {
+        document.body.removeChild(tempOverlay);
+    });
+    
+    // 组装DOM
+    tempContainer.appendChild(tempText);
+    tempContainer.appendChild(tempButton);
+    tempContainer.appendChild(closeButton);
+    tempOverlay.appendChild(tempContainer);
+    
+    // 添加到页面
+    document.body.appendChild(tempOverlay);
 }
 
 // 初始化拖放区域事件
