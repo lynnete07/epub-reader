@@ -102,7 +102,26 @@ function generateFileId(file, title) {
     // 生成一个基于文件信息和标题的唯一ID
     const fileInfo = `${file.name}-${file.size}-${file.lastModified}`;
     const titleInfo = title ? `-${title}` : '';
-    return `book-${btoa(fileInfo + titleInfo).replace(/[+/=]/g, '')}`;
+    
+    // 使用安全的Base64编码（支持UTF-8），避免使用btoa直接处理可能包含非拉丁字符的字符串
+    return `book-${safeBase64Encode(fileInfo + titleInfo).replace(/[+/=]/g, '')}`;
+}
+
+// 安全的Base64编码函数，支持UTF-8字符
+function safeBase64Encode(str) {
+    try {
+        // 对于纯ASCII字符串，直接使用btoa
+        return btoa(str);
+    } catch (e) {
+        // 对于包含非ASCII字符的字符串，先转为UTF-8编码
+        const encoder = new TextEncoder();
+        const bytes = encoder.encode(str);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) {
+            binary += String.fromCharCode(bytes[i]);
+        }
+        return btoa(binary);
+    }
 }
 
 // 生成会话ID
@@ -360,7 +379,19 @@ async function handleEpubFile(file, existingBookPath = null) {
                         
                         // 将二进制数据转换为Base64字符串
                         const binaryStr = Array.from(chunk).map(b => String.fromCharCode(b)).join('');
-                        const base64Str = btoa(binaryStr);
+                        // 使用安全的Base64编码函数，避免非Latin1字符的问题
+                        let base64Str;
+                        try {
+                            base64Str = btoa(binaryStr);
+                        } catch (encodeError) {
+                            // 如果直接btoa失败，记录错误但不影响用户体验
+                            console.warn('存储时Base64编码失败，尝试替代方案', encodeError);
+                            
+                            // 使用替代方案：先将字节数据转为hex字符串
+                            base64Str = Array.from(chunk)
+                                .map(b => b.toString(16).padStart(2, '0'))
+                                .join('');
+                        }
                         
                         try {
                             localStorage.setItem(`${bookId}_chunk_${i}`, base64Str);
@@ -1534,7 +1565,19 @@ async function restoreBookFromId(bookId) {
             
             try {
                 // 将Base64编码的数据转换回二进制
-                const binaryChunk = atob(chunk);
+                // 检查是否是base64格式（会包含+ / =等字符）或hex格式（只有16进制字符）
+                let binaryChunk;
+                if (/^[0-9a-f]+$/i.test(chunk)) {
+                    // 处理hex格式
+                    binaryChunk = '';
+                    for (let j = 0; j < chunk.length; j += 2) {
+                        const hexByte = chunk.substring(j, j + 2);
+                        binaryChunk += String.fromCharCode(parseInt(hexByte, 16));
+                    }
+                } else {
+                    // 处理base64格式
+                    binaryChunk = atob(chunk);
+                }
                 actualSize += binaryChunk.length;
                 chunks.push(binaryChunk);
             } catch (error) {
