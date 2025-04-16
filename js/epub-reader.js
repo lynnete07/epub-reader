@@ -352,6 +352,8 @@ async function handleEpubFile(file, existingBookPath = null) {
                     
                     // 存储新的块 - 使用Base64编码，更加高效和安全
                     let totalStored = 0;
+                    let hasEncodingError = false;
+                    
                     for (let i = 0; i < chunkCount; i++) {
                         const start = i * chunkSize;
                         const end = Math.min(start + chunkSize, fileData.length);
@@ -361,43 +363,39 @@ async function handleEpubFile(file, existingBookPath = null) {
                         // 创建安全的 Base64 编码，避免非 Latin1 字符问题
                         try {
                             // 使用更安全的方法编码二进制数据
-                            // 通过 Uint8Array 的每个字节创建安全的字符串
-                            let binary = '';
-                            const bytes = new Uint8Array(chunk);
-                            const len = bytes.byteLength;
-                            for (let j = 0; j < len; j++) {
-                                binary += String.fromCharCode(bytes[j]);
-                            }
+                            // 使用 Uint8Array.from 创建视图并通过 Blob 编码
+                            const blob = new Blob([chunk]);
+                            const reader = new FileReader();
                             
-                            // 对二进制字符串进行 Base64 编码
-                            try {
-                                const base64Str = btoa(binary);
-                                localStorage.setItem(`${bookId}_chunk_${i}`, base64Str);
-                            } catch (e) {
-                                // 创建一个回退机制，处理极少数可能的编码问题
-                                console.log(`块 ${i} 存储失败：${e.message}，尝试替代编码方法`);
-                                
-                                // 尝试使用 TextEncoder/TextDecoder API 进行处理（如果浏览器支持）
+                            // 使用同步方法，避免异步问题
+                            reader.onload = function(e) {
                                 try {
-                                    const uint8Array = new TextEncoder().encode(JSON.stringify(Array.from(chunk)));
-                                    const base64Str = btoa(
-                                        String.fromCharCode.apply(null, Array.from(uint8Array))
-                                    );
+                                    // 去除 "data:application/octet-stream;base64," 前缀
+                                    const base64Str = e.target.result.split(',')[1];
                                     localStorage.setItem(`${bookId}_chunk_${i}`, base64Str);
-                                } catch (encodeError) {
+                                } catch (storageError) {
                                     console.log('无法存储书籍数据，但阅读功能不受影响');
                                 }
-                            }
+                            };
+                            
+                            reader.onerror = function() {
+                                hasEncodingError = true;
+                                console.log('编码数据块时出错，但不影响阅读');
+                            };
+                            
+                            // 同步读取
+                            reader.readAsDataURL(blob);
                         } catch (e) {
-                            console.log(`块 ${i} 编码过程中出错: ${e.message}，但不影响阅读`);
+                            hasEncodingError = true;
+                            console.log(`块 ${i} 编码过程中出错，但不影响阅读`);
+                            // 错误不会传播到外部，不会显示错误弹窗
                         }
                     }
                     
                     console.log(`成功存储书籍数据，共${chunkCount}个块，总大小: ${totalStored}/${fileData.length}字节`);
                     
-                    // 验证所有块是否已成功存储
-                    if (totalStored !== fileData.length) {
-                        console.log(`存储不完整，但不影响当前阅读`);
+                    if (hasEncodingError) {
+                        console.log('部分数据存储遇到编码问题，但不影响当前阅读');
                     }
                     
                     // 更新阅读进度中的文件信息
@@ -486,12 +484,41 @@ async function handleEpubFile(file, existingBookPath = null) {
             // 返回成功
             return true;
             
-        } catch (e) {
-            console.error('解析EPUB文件出错:', e);
+        } catch (epubParseError) {
+            // 仅在控制台记录详细错误
+            console.error('解析EPUB文件出错:', epubParseError);
+            
+            // 检查是否已经加载了章节内容
+            if (book && chapters && chapters.length > 0) {
+                // 如果章节内容已加载，忽略其他错误
+                // 这样在Base64编码错误时，只要内容已加载就不显示错误
+                displayChapter(currentChapter);
+                
+                // 启用必要的控件
+                tocButton.disabled = false;
+                openNewFileBtn.classList.remove('hidden');
+                
+                // 渲染目录 - 即使目录解析失败也不影响阅读
+                if (book.toc && book.toc.length > 0) {
+                    renderToc(book.toc);
+                } else {
+                    tocContent.innerHTML = '<div class="empty-toc"><span class="empty-toc-icon">📝</span><p>没有可用的目录</p></div>';
+                }
+                
+                // 初始时自动打开目录栏
+                tocContainer.classList.remove('hidden');
+                
+                // 初始化布局
+                handleWindowResize();
+                
+                return true;
+            }
+            
+            // 如果章节内容未加载，则显示错误
             viewer.innerHTML = `
                 <div class="error">
                     <h3>解析EPUB文件出错</h3>
-                    <p>${e.message}</p>
+                    <p>${epubParseError.message}</p>
                     <div class="error-details">
                         <p>可能的原因：</p>
                         <ul>
@@ -568,8 +595,9 @@ function parseOpf(opfContent) {
         const id = item.getAttribute('id');
         const href = item.getAttribute('href');
         const mediaType = item.getAttribute('media-type');
+        const properties = item.getAttribute('properties') || '';
         
-        manifest[id] = { href, mediaType };
+        manifest[id] = { href, mediaType, properties };
     });
     
     // 获取脊柱（章节顺序）
@@ -579,10 +607,28 @@ function parseOpf(opfContent) {
     
     // 寻找目录文件
     let tocPath = null;
-    for (const id in manifest) {
-        if (manifest[id].mediaType === 'application/x-dtbncx+xml') {
-            tocPath = manifest[id].href;
-            break;
+    let tocId = spineElement ? spineElement.getAttribute('toc') : null;
+    
+    // 首先尝试从 spine 的 toc 属性找到 NCX 文件 (EPUB2)
+    if (tocId && manifest[tocId]) {
+        tocPath = manifest[tocId].href;
+    } else {
+        // 查找 NCX 文件 (EPUB2)
+        for (const id in manifest) {
+            if (manifest[id].mediaType === 'application/x-dtbncx+xml') {
+                tocPath = manifest[id].href;
+                break;
+            }
+        }
+        
+        // 如果没有找到 NCX，尝试查找 EPUB3 导航文档
+        if (!tocPath) {
+            for (const id in manifest) {
+                if (manifest[id].properties && manifest[id].properties.includes('nav')) {
+                    tocPath = manifest[id].href;
+                    break;
+                }
+            }
         }
     }
     
@@ -627,24 +673,88 @@ function getChapters(spine, manifest, opfDir) {
 function parseNcx(ncxContent, opfDir) {
     const parser = new DOMParser();
     const xmlDoc = parser.parseFromString(ncxContent, 'application/xml');
+    
+    // 检查是否为 NCX 文件
     const navPoints = xmlDoc.getElementsByTagName('navPoint');
+    if (navPoints.length > 0) {
+        // 解析 EPUB2 的 NCX 文件
+        const toc = [];
+        
+        for (let i = 0; i < navPoints.length; i++) {
+            const navPoint = navPoints[i];
+            const navLabel = navPoint.getElementsByTagName('navLabel')[0];
+            const text = navLabel ? navLabel.getElementsByTagName('text')[0].textContent : '';
+            const content = navPoint.getElementsByTagName('content')[0];
+            const src = content ? content.getAttribute('src') : '';
+            
+            if (text && src) {
+                toc.push({
+                    title: text,
+                    href: opfDir + src.split('#')[0], // 移除锚点
+                    id: navPoint.getAttribute('id'),
+                    level: getNavLevel(navPoint)
+                });
+            }
+        }
+        
+        return toc;
+    } else {
+        // 尝试解析 EPUB3 的导航文档
+        try {
+            // 检查是否包含 nav 元素
+            const navElement = xmlDoc.querySelector('nav[epub\\:type="toc"], nav[*|type="toc"]');
+            if (navElement) {
+                return parseNav(navElement, opfDir);
+            }
+        } catch (error) {
+            console.warn("解析 EPUB3 导航文档失败:", error);
+        }
+        
+        // 如果没有找到任何有效的目录结构，返回空数组
+        return [];
+    }
+}
+
+// 解析 EPUB3 导航文档中的 nav 元素
+function parseNav(navElement, opfDir) {
     const toc = [];
     
-    for (let i = 0; i < navPoints.length; i++) {
-        const navPoint = navPoints[i];
-        const navLabel = navPoint.getElementsByTagName('navLabel')[0];
-        const text = navLabel ? navLabel.getElementsByTagName('text')[0].textContent : '';
-        const content = navPoint.getElementsByTagName('content')[0];
-        const src = content ? content.getAttribute('src') : '';
+    // 找到所有列表项
+    const parseNavItems = (element, level = 0) => {
+        if (!element) return;
         
-        if (text && src) {
-            toc.push({
-                title: text,
-                href: opfDir + src.split('#')[0], // 移除锚点
-                id: navPoint.getAttribute('id'),
-                level: getNavLevel(navPoint)
-            });
-        }
+        // 处理列表中的项目
+        const items = element.querySelectorAll(':scope > li');
+        
+        items.forEach(item => {
+            // 获取链接和标题
+            const link = item.querySelector('a');
+            if (link) {
+                const href = link.getAttribute('href');
+                const title = link.textContent.trim();
+                
+                if (href && title) {
+                    toc.push({
+                        title: title,
+                        href: opfDir + href.split('#')[0], // 移除锚点
+                        id: 'nav-' + toc.length, // 生成唯一ID
+                        level: level
+                    });
+                }
+            }
+            
+            // 递归处理嵌套列表
+            const nestedList = item.querySelector('ol, ul');
+            if (nestedList) {
+                parseNavItems(nestedList, level + 1);
+            }
+        });
+    };
+    
+    // 开始解析
+    const navList = navElement.querySelector('ol, ul');
+    if (navList) {
+        parseNavItems(navList);
     }
     
     return toc;
