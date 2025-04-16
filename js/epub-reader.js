@@ -102,26 +102,7 @@ function generateFileId(file, title) {
     // 生成一个基于文件信息和标题的唯一ID
     const fileInfo = `${file.name}-${file.size}-${file.lastModified}`;
     const titleInfo = title ? `-${title}` : '';
-    
-    // 使用安全的Base64编码（支持UTF-8），避免使用btoa直接处理可能包含非拉丁字符的字符串
-    return `book-${safeBase64Encode(fileInfo + titleInfo).replace(/[+/=]/g, '')}`;
-}
-
-// 安全的Base64编码函数，支持UTF-8字符
-function safeBase64Encode(str) {
-    try {
-        // 对于纯ASCII字符串，直接使用btoa
-        return btoa(str);
-    } catch (e) {
-        // 对于包含非ASCII字符的字符串，先转为UTF-8编码
-        const encoder = new TextEncoder();
-        const bytes = encoder.encode(str);
-        let binary = '';
-        for (let i = 0; i < bytes.length; i++) {
-            binary += String.fromCharCode(bytes[i]);
-        }
-        return btoa(binary);
-    }
+    return `book-${btoa(fileInfo + titleInfo).replace(/[+/=]/g, '')}`;
 }
 
 // 生成会话ID
@@ -372,33 +353,43 @@ async function handleEpubFile(file, existingBookPath = null) {
                     // 存储新的块 - 使用Base64编码，更加高效和安全
                     let totalStored = 0;
                     for (let i = 0; i < chunkCount; i++) {
-                    const start = i * chunkSize;
+                        const start = i * chunkSize;
                         const end = Math.min(start + chunkSize, fileData.length);
                         const chunk = fileData.subarray(start, end);
                         totalStored += (end - start);
                         
-                        // 将二进制数据转换为Base64字符串
-                        const binaryStr = Array.from(chunk).map(b => String.fromCharCode(b)).join('');
-                        // 使用安全的Base64编码函数，避免非Latin1字符的问题
-                        let base64Str;
+                        // 创建安全的 Base64 编码，避免非 Latin1 字符问题
                         try {
-                            base64Str = btoa(binaryStr);
-                        } catch (encodeError) {
-                            // 如果直接btoa失败，记录错误但不影响用户体验
-                            console.warn('存储时Base64编码失败，尝试替代方案', encodeError);
+                            // 使用更安全的方法编码二进制数据
+                            // 通过 Uint8Array 的每个字节创建安全的字符串
+                            let binary = '';
+                            const bytes = new Uint8Array(chunk);
+                            const len = bytes.byteLength;
+                            for (let j = 0; j < len; j++) {
+                                binary += String.fromCharCode(bytes[j]);
+                            }
                             
-                            // 使用替代方案：先将字节数据转为hex字符串
-                            base64Str = Array.from(chunk)
-                                .map(b => b.toString(16).padStart(2, '0'))
-                                .join('');
-                        }
-                        
-                        try {
-                            localStorage.setItem(`${bookId}_chunk_${i}`, base64Str);
+                            // 对二进制字符串进行 Base64 编码
+                            try {
+                                const base64Str = btoa(binary);
+                                localStorage.setItem(`${bookId}_chunk_${i}`, base64Str);
+                            } catch (e) {
+                                // 创建一个回退机制，处理极少数可能的编码问题
+                                console.log(`块 ${i} 存储失败：${e.message}，尝试替代编码方法`);
+                                
+                                // 尝试使用 TextEncoder/TextDecoder API 进行处理（如果浏览器支持）
+                                try {
+                                    const uint8Array = new TextEncoder().encode(JSON.stringify(Array.from(chunk)));
+                                    const base64Str = btoa(
+                                        String.fromCharCode.apply(null, Array.from(uint8Array))
+                                    );
+                                    localStorage.setItem(`${bookId}_chunk_${i}`, base64Str);
+                                } catch (encodeError) {
+                                    console.log('无法存储书籍数据，但阅读功能不受影响');
+                                }
+                            }
                         } catch (e) {
-                            // 静默处理localStorage错误，不再提示用户
-                            console.log('无法存储书籍数据，但阅读功能不受影响');
-                            break; // 退出存储循环
+                            console.log(`块 ${i} 编码过程中出错: ${e.message}，但不影响阅读`);
                         }
                     }
                     
@@ -1565,19 +1556,7 @@ async function restoreBookFromId(bookId) {
             
             try {
                 // 将Base64编码的数据转换回二进制
-                // 检查是否是base64格式（会包含+ / =等字符）或hex格式（只有16进制字符）
-                let binaryChunk;
-                if (/^[0-9a-f]+$/i.test(chunk)) {
-                    // 处理hex格式
-                    binaryChunk = '';
-                    for (let j = 0; j < chunk.length; j += 2) {
-                        const hexByte = chunk.substring(j, j + 2);
-                        binaryChunk += String.fromCharCode(parseInt(hexByte, 16));
-                    }
-                } else {
-                    // 处理base64格式
-                    binaryChunk = atob(chunk);
-                }
+                const binaryChunk = atob(chunk);
                 actualSize += binaryChunk.length;
                 chunks.push(binaryChunk);
             } catch (error) {
