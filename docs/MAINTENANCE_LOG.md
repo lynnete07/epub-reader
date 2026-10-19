@@ -2,6 +2,37 @@
 
 按 `docs/MAINTENANCE_SOP.md` 执行，每次维护追加一条，只写事实与结论。
 
+## 2026-10-19 — 修复自定义字体输入后完全不生效
+
+**现象**
+用户粘贴 `iA Writer Quattro S, 方正屏显雅宋简体` 后正文无任何变化；刷新也不恢复。
+
+**根因（决定性，单一）**
+`applyFontFamily()` 中的合法性校验把自定义键当成非法键清掉了：
+
+```js
+if (key === CUSTOM_FONT_KEY && !(settings.customFontStack || '').trim()) key = DEFAULT_FONT_KEY;
+if (!READER_FONTS[key]) key = DEFAULT_FONT_KEY;   // ← READER_FONTS 现在只有 sans，custom 必被回落
+```
+
+面板精简为两项后，`READER_FONTS` 表里只剩 `sans` 一项，`custom` 不在表中，于是**任何**自定义输入都会被静默降级为默认无衬线。更糟的是随后 `settings.fontFamily = key` 会把 `sans` 持久化进 localStorage，因此刷新恢复路径同样失效。
+
+**修复**
+- `applyFontFamily()` 引入 `useCustom` 判定先行放行自定义键：`!useCustom && !READER_FONTS[key]` 才回落默认；自定义栈为空时仍回落。
+- 自定义字体沿用默认档行距（`READER_FONTS[DEFAULT_FONT_KEY].lineHeight`），不再依赖表里不存在的条目。
+- 交互补全：自定义输入框回车立即提交并关闭面板（`change` 虽会触发，但面板不关，用户易误判为没生效）。
+
+**为何上轮的 12 条测试没抓到**
+上轮测试只覆盖了 `getFontStack()` / `customStackToCss()` 的栈转换，未覆盖 `applyFontFamily()` 的**键归一化**这一步——bug 恰好住在这一层。教训：测试要覆盖到"设置真正落到 DOM"的那一层，而不是只测纯函数。
+
+**已知副作用（不做自动迁移）**
+缺陷版本已把 `fontFamily: "sans"` 与用户输入的 `customFontStack` 一起写入 localStorage。修复后刷新不会自动恢复自定义字体——需要用户重新粘贴一次（或清空输入框重填）。不写自动迁移的原因：无法区分"用户显式点回默认"与"缺陷版本写入的 sans"，强行迁移会让"默认 · 无衬线"永远无法选中。
+
+**验证**
+- 从真实源码抽取 `applyFontFamily` + `customStackToCss` + `getFontStack`，注入 stub DOM 跑 8 条用例：修复前 3 条失败（应用值 / fontFamily 保持 custom / 刷新恢复路径），修复后 8/8 通过。
+- 再次确认两款字体在本机的真实 family 名：`iA Writer Quattro S`、`方正屏显雅宋简体`（带"简体"后缀，PostScript 名 `FZPingXianYaSongS-R-GB`）。
+- Service Worker 缓存版本 `v5` → `v6`。
+
 ## 2026-10-19 — 字体面板改为"默认 + 自定义本机字体"，字号与行距优化
 
 **用户决策**

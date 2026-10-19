@@ -98,9 +98,16 @@ function getFontStack(key) {
 // 应用阅读字体。rescaleProgress 为 true 时按比例换算滚动位置：
 // 字体改变会让内容重排，已存的像素进度会漂移，按 scrollHeight 比例修正
 function applyFontFamily(key, rescaleProgress = true) {
-    if (key === CUSTOM_FONT_KEY && !(settings.customFontStack || '').trim()) key = DEFAULT_FONT_KEY;
-    if (!READER_FONTS[key]) key = DEFAULT_FONT_KEY;
-    const lineHeight = (READER_FONTS[key] || READER_FONTS[DEFAULT_FONT_KEY]).lineHeight;
+    // 自定义字体不在 READER_FONTS 表里（它由 settings.customFontStack 提供），
+    // 必须单独放行——否则会被下一行当成非法键静默回落默认，用户输入永远无效。
+    // 栈为空时同样回落默认。
+    const useCustom = key === CUSTOM_FONT_KEY && (settings.customFontStack || '').trim() !== '';
+    if (!useCustom && !READER_FONTS[key]) key = DEFAULT_FONT_KEY;
+
+    // 自定义字体沿用默认档的行距
+    const lineHeight = useCustom
+        ? READER_FONTS[DEFAULT_FONT_KEY].lineHeight
+        : READER_FONTS[key].lineHeight;
     const beforeTop = viewer.scrollTop;
     const beforeHeight = viewer.scrollHeight;
 
@@ -164,6 +171,14 @@ function buildFontPanel() {
         input.style.fontFamily = customStackToCss(input.value);
     });
     input.addEventListener('change', commitCustom);
+    // 回车立即提交并关闭面板（粘贴后最可能的操作），避免用户以为没生效
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            commitCustom();
+            fontPanel.classList.add('hidden');
+        }
+    });
     customWrap.appendChild(input);
 
     const hint = document.createElement('p');
