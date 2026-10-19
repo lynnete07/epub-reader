@@ -13,31 +13,20 @@ const overlay = document.getElementById('overlay');
 const fontButton = document.getElementById('font-button');
 const fontPanel = document.getElementById('font-panel');
 
-// 可选阅读字体（仅系统字体栈，零下载零缓存负担）
-// settings.fontFamily 存键名而非 CSS 字符串，将来新增字体只需在此表加一项
+// 可选阅读字体。默认仅一项系统无衬线栈，其余交给「自定义」——用户填本机
+// 已安装的字体名（支持逗号分隔回退栈，如 "iA Writer Quattro S, 方正屏显雅宋简体"：
+// 拉丁字形用前者、中文自动回落后者）。不打包字体文件：商业字体再分发有授权问题，
+// 引用字体名完全合法，未安装的设备走回退栈，体验不降级。
+// lineHeight 与字体成套搭配；将来新增预置字体只需在此表加一项。
 const READER_FONTS = {
     sans: {
         name: '默认 · 无衬线',
+        lineHeight: 1.7,
         stack: "system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif"
-    },
-    serif: {
-        name: '衬线 · 适合长文',
-        stack: "Georgia, 'Palatino Linotype', Palatino, 'Songti SC', SimSun, serif"
-    },
-    song: {
-        name: '宋体',
-        stack: "'Songti SC', STSong, SimSun, 'Noto Serif CJK SC', serif"
-    },
-    kai: {
-        name: '楷体',
-        stack: "'Kaiti SC', STKaiti, KaiTi, 'Noto Serif CJK SC', serif"
-    },
-    mono: {
-        name: '等宽',
-        stack: "ui-monospace, 'SF Mono', Menlo, Consolas, 'PingFang SC', 'Microsoft YaHei', monospace"
     }
 };
 const DEFAULT_FONT_KEY = 'sans';
+const CUSTOM_FONT_KEY = 'custom';
 
 // EPUB 相关变量
 let book = null;
@@ -58,6 +47,7 @@ const settings = {
     theme: 'light',
     fontSize: 18,
     fontFamily: DEFAULT_FONT_KEY,
+    customFontStack: '',
     readingProgress: {}
 };
 
@@ -86,16 +76,37 @@ function loadSettings() {
     }
 }
 
+// 解析自定义字体栈：逗号分段、去空白、统一加引号（含空格/中文的字体名安全），
+// 尾部追加默认栈兜底，用户字体缺失时静默回退
+function customStackToCss(raw) {
+    const userStack = (raw || '')
+        .split(',')
+        .map(s => s.trim().replace(/^["']|["']$/g, '').trim())
+        .filter(Boolean)
+        .map(name => `"${name.replace(/"/g, '')}"`)
+        .join(', ');
+    return userStack ? userStack + ', ' + READER_FONTS[DEFAULT_FONT_KEY].stack : '';
+}
+
+function getFontStack(key) {
+    if (key === CUSTOM_FONT_KEY) {
+        return customStackToCss(settings.customFontStack) || READER_FONTS[DEFAULT_FONT_KEY].stack;
+    }
+    return (READER_FONTS[key] || READER_FONTS[DEFAULT_FONT_KEY]).stack;
+}
+
 // 应用阅读字体。rescaleProgress 为 true 时按比例换算滚动位置：
 // 字体改变会让内容重排，已存的像素进度会漂移，按 scrollHeight 比例修正
 function applyFontFamily(key, rescaleProgress = true) {
+    if (key === CUSTOM_FONT_KEY && !(settings.customFontStack || '').trim()) key = DEFAULT_FONT_KEY;
     if (!READER_FONTS[key]) key = DEFAULT_FONT_KEY;
-    const font = READER_FONTS[key];
+    const lineHeight = (READER_FONTS[key] || READER_FONTS[DEFAULT_FONT_KEY]).lineHeight;
     const beforeTop = viewer.scrollTop;
     const beforeHeight = viewer.scrollHeight;
 
     settings.fontFamily = key;
-    viewer.style.setProperty('--reader-font-family', font.stack);
+    viewer.style.setProperty('--reader-font-family', getFontStack(key));
+    viewer.style.setProperty('--reader-line-height', String(lineHeight));
 
     if (rescaleProgress && beforeHeight > 0 && viewer.scrollHeight > 0) {
         viewer.scrollTop = Math.round(beforeTop / beforeHeight * viewer.scrollHeight);
@@ -103,9 +114,11 @@ function applyFontFamily(key, rescaleProgress = true) {
     updateFontPanelActive();
 }
 
-// 构建字体选择面板：每个条目用它自己的字体渲染名字，所见即所得
+// 构建字体选择面板：预置项以自身字体渲染名字做预览；自定义区支持
+// 输入本机已安装的字体名（逗号分隔多字体回退栈），输入框即时预览
 function buildFontPanel() {
     fontPanel.innerHTML = '';
+
     for (const [key, font] of Object.entries(READER_FONTS)) {
         const item = document.createElement('button');
         item.type = 'button';
@@ -120,13 +133,52 @@ function buildFontPanel() {
         });
         fontPanel.appendChild(item);
     }
+
+    const customWrap = document.createElement('div');
+    customWrap.className = 'font-custom';
+    customWrap.dataset.fontKey = CUSTOM_FONT_KEY;
+
+    const title = document.createElement('div');
+    title.className = 'font-custom-title';
+    title.textContent = '自定义本机字体';
+    customWrap.appendChild(title);
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'font-custom-input';
+    input.placeholder = 'iA Writer Quattro S, 方正屏显雅宋简体';
+    input.value = settings.customFontStack || '';
+    input.spellcheck = false;
+
+    const commitCustom = () => {
+        settings.customFontStack = input.value.trim();
+        if (settings.customFontStack) {
+            applyFontFamily(CUSTOM_FONT_KEY);
+        } else {
+            applyFontFamily(DEFAULT_FONT_KEY);
+        }
+        saveSettings();
+    };
+    // 输入即时预览（不落盘），失焦/回车提交
+    input.addEventListener('input', () => {
+        input.style.fontFamily = customStackToCss(input.value);
+    });
+    input.addEventListener('change', commitCustom);
+    customWrap.appendChild(input);
+
+    const hint = document.createElement('p');
+    hint.className = 'font-hint';
+    hint.textContent = '填本机已安装的字体名，逗号分隔、依次回退：前面的字体优先，缺字自动用后面的补。\n查字体名：macOS 打开「字体册」（Font Book）；Windows 设置 → 个性化 → 字体。\n多字体可按语言分工，如示例：英文用 Quattro S、中文回退雅宋。';
+    customWrap.appendChild(hint);
+
+    fontPanel.appendChild(customWrap);
     updateFontPanelActive();
 }
 
 // 高亮当前选中字体
 function updateFontPanelActive() {
     if (!fontPanel) return;
-    fontPanel.querySelectorAll('.font-option').forEach(el => {
+    fontPanel.querySelectorAll('[data-font-key]').forEach(el => {
         el.classList.toggle('active', el.dataset.fontKey === settings.fontFamily);
     });
 }
@@ -267,9 +319,9 @@ function toggleTheme() {
     saveSettings();
 }
 
-// 改变字体大小
+// 改变字体大小（上限 32：无障碍与移动端大字阅读需求）
 function changeFontSize(delta) {
-    settings.fontSize = Math.max(12, Math.min(24, settings.fontSize + delta));
+    settings.fontSize = Math.max(12, Math.min(32, settings.fontSize + delta));
     document.documentElement.style.setProperty('--font-size-base', `${settings.fontSize}px`);
     saveSettings();
 }

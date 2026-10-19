@@ -118,7 +118,7 @@ body {
     position: absolute;
     top: calc(100% + 8px);
     right: 0;
-    min-width: 220px;
+    width: 280px;
     padding: 0.4rem;
     background-color: var(--content-bg);
     border: 1px solid var(--border-color);
@@ -147,6 +147,50 @@ body {
 .font-panel .font-option.active {
     background-color: var(--accent-color);
     color: #ffffff;
+}
+
+/* 自定义字体输入区 */
+.font-custom {
+    padding: 0.6rem 0.8rem 0.4rem;
+    border-top: 1px solid var(--border-color);
+    margin-top: 0.4rem;
+}
+
+.font-custom-title {
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--text-color);
+    margin-bottom: 0.45rem;
+}
+
+.font-custom-input {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.45rem 0.6rem;
+    font-size: 0.88rem;
+    color: var(--text-color);
+    background-color: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+}
+
+.font-custom-input:focus {
+    outline: none;
+    border-color: var(--accent-color);
+}
+
+.font-custom.active .font-custom-input {
+    border-color: var(--accent-color);
+}
+
+.font-hint {
+    font-size: 0.72rem;
+    color: var(--text-color);
+    opacity: 0.65;
+    line-height: 1.5;
+    margin: 0.45rem 0 0.2rem;
+    white-space: pre-line;
 }
 
 button {
@@ -334,7 +378,7 @@ button i {
     margin-left: 300px;
     padding: 1.5rem 2rem;
     font-size: var(--font-size-base);
-    line-height: var(--line-height);
+    line-height: var(--reader-line-height, var(--line-height));
     color: var(--text-color);
     transition: margin-left 0.3s, color 0.3s;
     overflow-y: auto;
