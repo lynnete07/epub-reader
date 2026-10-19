@@ -23,6 +23,7 @@ let isProcessingScroll = false; // 用于防止滚动过程中多次触发章节
 let lastScrollTime = 0; // 最后一次滚动的时间戳
 let scrollThrottleTime = 500; // 滚动切换章节的间隔时间（毫秒）
 let isRestoringBook = false; // 标记是否正在恢复书籍
+let objectUrls = []; // 本章为图片/字体等资源创建的 blob URL，切章时统一回收
 
 // 应用设置
 const settings = {
@@ -115,6 +116,64 @@ function trackEvent(name) {
     } catch (e) {
         // 统计失败不应打断阅读
     }
+}
+
+// 把章节内的相对引用解析成 zip 条目名
+// chapter.href 形如 "OEBPS/chapter1.xhtml"，没有前导斜杠。必须拼成 file:///，
+// 否则 URL 会把 "OEBPS" 当成主机名而不是目录，解析结果会丢掉整个子目录前缀。
+function resolveZipPath(src, baseHref) {
+    if (!src) return null;
+    const value = src.trim();
+    // 外链与内联数据交给浏览器，不在 zip 里查找
+    if (/^(https?:)?\/\//i.test(value) || value.startsWith('data:')) return null;
+    try {
+        const url = new URL(value, 'file:///' + baseHref);
+        // decodeURIComponent 还原空格、中文等被百分号编码的字符
+        return decodeURIComponent(url.pathname).replace(/^\/+/, '');
+    } catch (e) {
+        return null;
+    }
+}
+
+// 把 zip 内的资源转成 blob URL，并登记以便切章时回收
+async function createObjectUrlFromZip(path) {
+    if (!book || !path) return null;
+    const entry = book.zip.file(path);
+    if (!entry) return null;
+    try {
+        const blob = await entry.async('blob');
+        const url = URL.createObjectURL(blob);
+        objectUrls.push(url);
+        return url;
+    } catch (e) {
+        console.warn('创建资源 URL 失败:', path, e);
+        return null;
+    }
+}
+
+// 把 CSS 里的 url(...) 替换为可访问的 blob URL
+// basePath 传样式表自身在 zip 中的路径，这样样式表内部的相对引用才解析正确
+async function inlineCssUrls(css, basePath) {
+    if (!css) return css;
+    const refs = css.match(/url\(([^)]*)\)/g) || [];
+    for (const ref of refs) {
+        const raw = ref.slice(4, -1).trim().replace(/^['"]+|['"]+$/g, '');
+        const path = resolveZipPath(raw, basePath);
+        if (!path) continue;
+        const url = await createObjectUrlFromZip(path);
+        if (url) {
+            css = css.split(ref).join(`url("${url}")`);
+        }
+    }
+    return css;
+}
+
+// 回收上一章创建的 blob URL，避免长时间阅读后内存持续增长
+function releaseObjectUrls() {
+    for (const url of objectUrls) {
+        URL.revokeObjectURL(url);
+    }
+    objectUrls = [];
 }
 
 // 切换主题
@@ -794,49 +853,58 @@ async function displayChapter(index) {
     
     try {
         const chapter = chapters[index];
+
+        // 回收上一章创建的 blob URL，避免长时间阅读后内存持续增长
+        releaseObjectUrls();
+
         const content = await book.zip.file(chapter.href).async('text');
         
         // 解析HTML内容
         const parser = new DOMParser();
         const htmlDoc = parser.parseFromString(content, 'text/html');
         
-        // 提取<body>内容
-        const bodyContent = htmlDoc.body ? htmlDoc.body.innerHTML : content;
-        
         // 提取CSS
+        // 外链样式表同样要用 resolveZipPath 定位；样式表内部的 url() 以样式表
+        // 自身所在目录为基准，所以要传 cssPath 而不是章节路径
         const styles = Array.from(htmlDoc.querySelectorAll('style, link[rel="stylesheet"]'));
         let cssContent = '';
         
         for (const style of styles) {
             if (style.tagName === 'STYLE') {
-                cssContent += style.textContent;
+                cssContent += await inlineCssUrls(style.textContent, chapter.href);
             } else if (style.tagName === 'LINK' && style.getAttribute('href')) {
-                const href = style.getAttribute('href');
-                const cssPath = new URL(href, 'file://' + chapter.href).pathname.substring(1);
-                const cssFile = book.zip.file(cssPath);
+                const cssPath = resolveZipPath(style.getAttribute('href'), chapter.href);
+                if (!cssPath) continue;
                 
+                const cssFile = book.zip.file(cssPath);
                 if (cssFile) {
                     const css = await cssFile.async('text');
-                    cssContent += css;
+                    cssContent += await inlineCssUrls(css, cssPath);
                 }
             }
         }
         
-        // 处理图片
-        const images = Array.from(htmlDoc.querySelectorAll('img'));
-        for (const img of images) {
-            if (img.getAttribute('src')) {
-                const src = img.getAttribute('src');
-                const imgPath = new URL(src, 'file://' + chapter.href).pathname.substring(1);
-                const imgFile = book.zip.file(imgPath);
-                
-                if (imgFile) {
-                    const blob = await imgFile.async('blob');
-                    const url = URL.createObjectURL(blob);
-                    img.setAttribute('src', url);
-                }
+        // 处理图片：<img src> 与内嵌 SVG 的 <image href / xlink:href>
+        // 必须在序列化 bodyContent 之前改 DOM，否则替换结果不会进入渲染内容
+        const imageNodes = Array.from(htmlDoc.querySelectorAll('img, image'));
+        for (const node of imageNodes) {
+            const attr = node.hasAttribute('src') ? 'src'
+                : (node.hasAttribute('href') ? 'href' : 'xlink:href');
+            const src = node.getAttribute(attr);
+            if (!src) continue;
+            
+            const imgPath = resolveZipPath(src, chapter.href);
+            if (!imgPath) continue;
+            
+            const url = await createObjectUrlFromZip(imgPath);
+            if (url) {
+                node.setAttribute(attr, url);
             }
         }
+        
+        // 提取<body>内容
+        // 必须放在资源替换之后：bodyContent 是字符串快照，早取会丢掉上面的修改
+        const bodyContent = htmlDoc.body ? htmlDoc.body.innerHTML : content;
         
         // 显示内容前先重置滚动位置（除非显式指定跳转到结尾）
         if (!fromTocNavigation || !window.jumpToEnd) {
