@@ -31,5 +31,22 @@
 
 - **保留自定义事件代码，暂不升级 Vercel 套餐**（2026-10-19）。理由：Hobby 计划下 `epub_opened`、`chapter_viewed` 只在后台不可见，但代码零副作用——`window.va` 不存在时 `trackEvent()` 静默跳过，不影响阅读、不发送数据。将来若想看"有没有人真的打开书"再升级，代码一行都不用改。当前可见性只到第一层（访客 / 浏览量 / 来源 / 国家 / 设备）。
 
+## 2026-10-19 — 修复章节图片与外链样式表无法显示
+
+**根因（两个 bug 叠加）**
+1. `displayChapter()` 在图片替换**之前**就把 `<body>` 序列化成字符串快照，图片循环改的是游离 DOM，最终渲染仍用旧字符串，所有 blob URL 替换被丢弃。本地图片自上线起从未生效。
+2. `new URL(src, 'file://' + chapter.href)`：`chapter.href` 无前导斜杠，`OEBPS` 被当作主机名，解析丢掉整个子目录前缀，`zip.file()` 返回 null。只有扁平结构的 EPUB 恰好能过；外链样式表 href 同样中招。
+
+**修复**
+- `bodyContent` 序列化移到资源替换之后。
+- 新增 `resolveZipPath()`：base 用 `file:///`，结果 `decodeURIComponent`，跳过 `data:` 与 `http(s)://`。
+- 覆盖内嵌 SVG `<image href/xlink:href>`；CSS 内 `url()` 背景图替换为 blob URL（以样式表自身路径为基准）。
+- 新增 `releaseObjectUrls()`，切章回收 blob URL，防内存增长。
+- Service Worker 缓存版本 `v2` → `v3`。
+
+**验证**
+- `resolveZipPath` 从真实源码抽取跑 12 条用例全过（子目录 / `../` / `./` / 空格 / 中文 / 扁平 / 外链跳过）。
+- 测试 EPUB：`~/Downloads/lightreader-image-test.epub`（含子目录、空格文件名、CSS 背景图、SVG 图），浏览器实读待人工确认。
+
 **未能验证**
 - 本次维护所在环境的网络无法直连 Vercel 与外网，线上部署结果需人工在浏览器确认。
