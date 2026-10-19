@@ -22,7 +22,6 @@ let fromTocNavigation = false; // 标记当前章节切换是否来自目录导�
 let isProcessingScroll = false; // 用于防止滚动过程中多次触发章节切换
 let lastScrollTime = 0; // 最后一次滚动的时间戳
 let scrollThrottleTime = 500; // 滚动切换章节的间隔时间（毫秒）
-let sessionId = ''; // 当前会话的唯一标识符
 let isRestoringBook = false; // 标记是否正在恢复书籍
 
 // 应用设置
@@ -105,9 +104,17 @@ function generateFileId(file, title) {
     return `book-${btoa(fileInfo + titleInfo).replace(/[+/=]/g, '')}`;
 }
 
-// 生成会话ID
-function generateSessionId() {
-    return 'session-' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+// 匿名产品事件上报（Vercel Web Analytics）
+// 只上报事件名称，绝不携带书名、作者、正文、阅读位置、书籍 ID 或任何可识别信息。
+// 统计不可用时静默失败，任何情况下都不影响阅读。
+function trackEvent(name) {
+    try {
+        if (typeof window.va === 'function') {
+            window.va('event', { name });
+        }
+    } catch (e) {
+        // 统计失败不应打断阅读
+    }
 }
 
 // 切换主题
@@ -481,6 +488,9 @@ async function handleEpubFile(file, existingBookPath = null) {
                 }
             }, 30000); // 每30秒保存一次
             
+            // 匿名上报：一本书被成功打开（不含书名等任何内容信息）
+            trackEvent('epub_opened');
+
             // 返回成功
             return true;
             
@@ -510,7 +520,10 @@ async function handleEpubFile(file, existingBookPath = null) {
                 
                 // 初始化布局
                 handleWindowResize();
-                
+
+                // 目录等次要步骤失败但正文可用，同样视为成功打开
+                trackEvent('epub_opened');
+
                 return true;
             }
             
@@ -906,6 +919,9 @@ async function displayChapter(index) {
         
         // 更新目录中当前章节高亮显示
         updateActiveTocItem(chapter.href);
+
+        // 匿名上报：一章被成功渲染（只含事件名，不含章节标题或位置）
+        trackEvent('chapter_viewed');
         
         // 保存阅读进度
         saveReadingProgress();
@@ -1272,14 +1288,6 @@ function handleWindowResize() {
 
 // 初始化应用
 function init() {
-    // 生成会话ID
-    sessionId = generateSessionId();
-    
-    // 添加会话ID到URL查询参数，用于识别当前会话
-    const currentUrl = new URL(window.location.href);
-    currentUrl.searchParams.set('sid', sessionId);
-    window.history.replaceState({}, '', currentUrl);
-    
     // 加载设置
     loadSettings();
     
@@ -1507,7 +1515,7 @@ document.addEventListener('keydown', (e) => {
     }
     
     // 显示版本信息在控制台
-    console.log('LightReader v1.0.0', `会话ID: ${sessionId}`);
+    console.log('LightReader v1.0.0');
 }
 
 // 从URL哈希中获取书籍ID
