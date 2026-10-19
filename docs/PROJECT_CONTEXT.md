@@ -84,7 +84,7 @@ Vercel 配置于 2025-04-14 的提交 `93d55c4` 加入，并由 `4140c7f` 修正
 
 1. **Vercel 后台的 Analytics 开关尚未开启**——不开启则访问数据为零，需人工在管理台确认。
 2. `manifest.json` 声明了 `img/icon-192.png` 与 `img/icon-512.png`，但 `img/` 目录为空，PWA 图标 404，"添加到主屏幕"体验降级。要么补图标，要么删除这两条声明。
-3. 自定义事件在 Hobby 计划后台不可见，需判断是否升级 Vercel 套餐。
+3. 自定义事件在 Hobby 计划后台不可见。已决定保留代码、暂不升级套餐（2026-10-19）：`window.va` 不存在时 `trackEvent()` 静默跳过，零副作用；升级后可直接在 Events 面板看到，无需改代码。
 4. CDN 依赖（JSZip 3.10.1、Font Awesome 6.4.0）长期未核对版本可用性。
 
 维护流程见 [`docs/MAINTENANCE_SOP.md`](MAINTENANCE_SOP.md)，历次维护记录见 [`docs/MAINTENANCE_LOG.md`](MAINTENANCE_LOG.md)。
