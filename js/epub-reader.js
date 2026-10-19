@@ -10,6 +10,34 @@ const fontIncrease = document.getElementById('font-increase');
 const fontDecrease = document.getElementById('font-decrease');
 const openNewFileBtn = document.getElementById('open-new-file');
 const overlay = document.getElementById('overlay');
+const fontButton = document.getElementById('font-button');
+const fontPanel = document.getElementById('font-panel');
+
+// 可选阅读字体（仅系统字体栈，零下载零缓存负担）
+// settings.fontFamily 存键名而非 CSS 字符串，将来新增字体只需在此表加一项
+const READER_FONTS = {
+    sans: {
+        name: '默认 · 无衬线',
+        stack: "system-ui, -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif"
+    },
+    serif: {
+        name: '衬线 · 适合长文',
+        stack: "Georgia, 'Palatino Linotype', Palatino, 'Songti SC', SimSun, serif"
+    },
+    song: {
+        name: '宋体',
+        stack: "'Songti SC', STSong, SimSun, 'Noto Serif CJK SC', serif"
+    },
+    kai: {
+        name: '楷体',
+        stack: "'Kaiti SC', STKaiti, KaiTi, 'Noto Serif CJK SC', serif"
+    },
+    mono: {
+        name: '等宽',
+        stack: "ui-monospace, 'SF Mono', Menlo, Consolas, 'PingFang SC', 'Microsoft YaHei', monospace"
+    }
+};
+const DEFAULT_FONT_KEY = 'sans';
 
 // EPUB 相关变量
 let book = null;
@@ -29,6 +57,7 @@ let objectUrls = []; // 本章为图片/字体等资源创建的 blob URL，切�
 const settings = {
     theme: 'light',
     fontSize: 18,
+    fontFamily: DEFAULT_FONT_KEY,
     readingProgress: {}
 };
 
@@ -48,10 +77,58 @@ function loadSettings() {
             
             // 应用字体大小
             document.documentElement.style.setProperty('--font-size-base', `${settings.fontSize}px`);
+
+            // 应用阅读字体（非法或缺失的键回落到默认）
+            applyFontFamily(settings.fontFamily || DEFAULT_FONT_KEY, false);
         } catch (e) {
             console.error('加载设置出错:', e);
         }
     }
+}
+
+// 应用阅读字体。rescaleProgress 为 true 时按比例换算滚动位置：
+// 字体改变会让内容重排，已存的像素进度会漂移，按 scrollHeight 比例修正
+function applyFontFamily(key, rescaleProgress = true) {
+    if (!READER_FONTS[key]) key = DEFAULT_FONT_KEY;
+    const font = READER_FONTS[key];
+    const beforeTop = viewer.scrollTop;
+    const beforeHeight = viewer.scrollHeight;
+
+    settings.fontFamily = key;
+    viewer.style.setProperty('--reader-font-family', font.stack);
+
+    if (rescaleProgress && beforeHeight > 0 && viewer.scrollHeight > 0) {
+        viewer.scrollTop = Math.round(beforeTop / beforeHeight * viewer.scrollHeight);
+    }
+    updateFontPanelActive();
+}
+
+// 构建字体选择面板：每个条目用它自己的字体渲染名字，所见即所得
+function buildFontPanel() {
+    fontPanel.innerHTML = '';
+    for (const [key, font] of Object.entries(READER_FONTS)) {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'font-option';
+        item.dataset.fontKey = key;
+        item.style.fontFamily = font.stack;
+        item.textContent = font.name;
+        item.addEventListener('click', () => {
+            applyFontFamily(key);
+            saveSettings();
+            fontPanel.classList.add('hidden');
+        });
+        fontPanel.appendChild(item);
+    }
+    updateFontPanelActive();
+}
+
+// 高亮当前选中字体
+function updateFontPanelActive() {
+    if (!fontPanel) return;
+    fontPanel.querySelectorAll('.font-option').forEach(el => {
+        el.classList.toggle('active', el.dataset.fontKey === settings.fontFamily);
+    });
 }
 
 // 保存设置到本地存储
@@ -1363,6 +1440,25 @@ function init() {
     themeToggle.addEventListener('click', toggleTheme);
     fontIncrease.addEventListener('click', () => changeFontSize(1));
     fontDecrease.addEventListener('click', () => changeFontSize(-1));
+
+    // 字体选择面板
+    buildFontPanel();
+    fontButton.addEventListener('click', (e) => {
+        e.stopPropagation();
+        fontPanel.classList.toggle('hidden');
+    });
+    // 点击面板外任意处关闭面板
+    document.addEventListener('click', (e) => {
+        if (!fontPanel.classList.contains('hidden') && !fontPanel.contains(e.target) && e.target !== fontButton) {
+            fontPanel.classList.add('hidden');
+        }
+    });
+    // Esc 关闭面板
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !fontPanel.classList.contains('hidden')) {
+            fontPanel.classList.add('hidden');
+        }
+    });
     
     // 目录按钮点击事件处理 - 修复
 tocButton.addEventListener('click', () => {

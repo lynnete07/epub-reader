@@ -109,6 +109,46 @@ body {
     gap: 0.5rem;
 }
 
+.font-controls {
+    position: relative;
+}
+
+/* 字体选择面板 */
+.font-panel {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    min-width: 220px;
+    padding: 0.4rem;
+    background-color: var(--content-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px var(--shadow-color);
+    z-index: 200;
+}
+
+.font-panel .font-option {
+    display: block;
+    width: 100%;
+    padding: 0.55rem 0.8rem;
+    background: transparent;
+    color: var(--text-color);
+    border: none;
+    border-radius: 6px;
+    font-size: 0.95rem;
+    text-align: left;
+    justify-content: flex-start;
+}
+
+.font-panel .font-option:hover {
+    background-color: var(--feature-bg);
+}
+
+.font-panel .font-option.active {
+    background-color: var(--accent-color);
+    color: #ffffff;
+}
+
 button {
     padding: 0.5rem 0.8rem;
     background-color: var(--primary-color);
@@ -307,6 +347,14 @@ button i {
     max-width: 800px;
     margin: 0 auto;
     padding: 0 1rem;
+}
+
+/* 用户字体设置：仅作用于正文内容，不影响界面与目录。
+   强覆盖书籍 CSS 的元素级 font-family 声明（如 Calibre 的 p.calibre），
+   但 pre/code/kbd/samp 不在覆盖列表里，UA 等宽样式仍然生效。 */
+.viewer .chapter-content,
+.viewer .chapter-content *:not(pre):not(code):not(kbd):not(samp) {
+    font-family: var(--reader-font-family, 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif) !important;
 }
 
 .viewer p {
