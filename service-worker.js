@@ -1,13 +1,14 @@
 // 缓存名称和版本
-const CACHE_NAME = 'lightreader-cache-v1';
+// 任何静态资源或阅读逻辑变动后，递增版本号以触发客户端缓存更新
+const CACHE_NAME = 'lightreader-cache-v2';
 
 // 需要缓存的静态资源
+// 注意：favicon 由 index.html 内的内联 data URI 提供，不要在这里预缓存 /favicon.ico
 const CACHE_ASSETS = [
     '/',
     '/index.html',
     '/css/styles.css',
     '/js/epub-reader.js',
-    '/favicon.ico',
     'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
     'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css',
     'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/webfonts/fa-solid-900.woff2'
@@ -19,7 +20,15 @@ self.addEventListener('install', event => {
         caches.open(CACHE_NAME)
             .then(cache => {
                 console.log('Service Worker: 缓存文件');
-                return cache.addAll(CACHE_ASSETS);
+                // 逐项缓存并吞掉单个失败：cache.addAll 是原子的，
+                // 任何一项 404 都会让整个 install 失败、离线能力全丢
+                return Promise.all(
+                    CACHE_ASSETS.map(url =>
+                        cache.add(url).catch(err => {
+                            console.warn('Service Worker: 跳过缓存失败的资源', url, err);
+                        })
+                    )
+                );
             })
             .then(() => self.skipWaiting())
     );
