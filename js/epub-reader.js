@@ -41,6 +41,7 @@ let lastScrollTime = 0; // 最后一次滚动的时间戳
 let scrollThrottleTime = 500; // 滚动切换章节的间隔时间（毫秒）
 let isRestoringBook = false; // 标记是否正在恢复书籍
 let objectUrls = []; // 本章为图片/字体等资源创建的 blob URL，切章时统一回收
+let legacyMigration = null; // 旧 localStorage 书籍分块 -> IndexedDB 的迁移 Promise
 
 // 应用设置
 const settings = {
@@ -126,6 +127,7 @@ function applyFontFamily(key, rescaleProgress = true) {
 function buildFontPanel() {
     fontPanel.innerHTML = '';
 
+    // 选项一：预置字体（与「自定义」互斥，二选一）
     for (const [key, font] of Object.entries(READER_FONTS)) {
         const item = document.createElement('button');
         item.type = 'button';
@@ -136,19 +138,13 @@ function buildFontPanel() {
         item.addEventListener('click', () => {
             applyFontFamily(key);
             saveSettings();
-            fontPanel.classList.add('hidden');
         });
         fontPanel.appendChild(item);
     }
 
+    // 选项二：自定义本机字体
     const customWrap = document.createElement('div');
     customWrap.className = 'font-custom';
-    customWrap.dataset.fontKey = CUSTOM_FONT_KEY;
-
-    const title = document.createElement('div');
-    title.className = 'font-custom-title';
-    title.textContent = '自定义本机字体';
-    customWrap.appendChild(title);
 
     const input = document.createElement('input');
     input.type = 'text';
@@ -157,29 +153,63 @@ function buildFontPanel() {
     input.value = settings.customFontStack || '';
     input.spellcheck = false;
 
+    // 提交自定义栈：非空则切到自定义，空则回落到默认（保持二选一语义）
     const commitCustom = () => {
         settings.customFontStack = input.value.trim();
-        if (settings.customFontStack) {
-            applyFontFamily(CUSTOM_FONT_KEY);
-        } else {
-            applyFontFamily(DEFAULT_FONT_KEY);
-        }
+        applyFontFamily(settings.customFontStack ? CUSTOM_FONT_KEY : DEFAULT_FONT_KEY);
         saveSettings();
     };
-    // 输入即时预览（不落盘），失焦/回车提交
+
+    const customBtn = document.createElement('button');
+    customBtn.type = 'button';
+    customBtn.className = 'font-option font-option-custom';
+    customBtn.dataset.fontKey = CUSTOM_FONT_KEY;
+    customBtn.textContent = '使用本机字体（自定义）';
+    customBtn.addEventListener('click', () => {
+        // 还没填就先聚焦输入框，而不是静默什么都不做
+        if (!input.value.trim()) {
+            input.focus();
+            return;
+        }
+        commitCustom();
+    });
+    customWrap.appendChild(customBtn);
+    customWrap.appendChild(input);
+
+    const actions = document.createElement('div');
+    actions.className = 'font-custom-actions';
+    const applyBtn = document.createElement('button');
+    applyBtn.type = 'button';
+    applyBtn.className = 'font-apply';
+    applyBtn.textContent = '应用';
+    applyBtn.addEventListener('click', commitCustom);
+    const clearBtn = document.createElement('button');
+    clearBtn.type = 'button';
+    clearBtn.className = 'font-clear';
+    clearBtn.textContent = '清除';
+    clearBtn.addEventListener('click', () => {
+        input.value = '';
+        input.style.fontFamily = '';
+        settings.customFontStack = '';
+        applyFontFamily(DEFAULT_FONT_KEY);
+        saveSettings();
+    });
+    actions.appendChild(applyBtn);
+    actions.appendChild(clearBtn);
+    customWrap.appendChild(actions);
+
+    // 输入即时预览（不落盘）
     input.addEventListener('input', () => {
         input.style.fontFamily = customStackToCss(input.value);
     });
+    // 失焦或回车提交
     input.addEventListener('change', commitCustom);
-    // 回车立即提交并关闭面板（粘贴后最可能的操作），避免用户以为没生效
     input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
             e.preventDefault();
             commitCustom();
-            fontPanel.classList.add('hidden');
         }
     });
-    customWrap.appendChild(input);
 
     const hint = document.createElement('p');
     hint.className = 'font-hint';
@@ -187,20 +217,190 @@ function buildFontPanel() {
     customWrap.appendChild(hint);
 
     fontPanel.appendChild(customWrap);
+
+    // 状态行：明确告诉用户当前生效的是哪一项
+    const status = document.createElement('div');
+    status.className = 'font-status';
+    fontPanel.appendChild(status);
+
     updateFontPanelActive();
 }
 
-// 高亮当前选中字体
+// 高亮当前选中的字体项（二选一，任何时候只有一项 active）
 function updateFontPanelActive() {
     if (!fontPanel) return;
     fontPanel.querySelectorAll('[data-font-key]').forEach(el => {
         el.classList.toggle('active', el.dataset.fontKey === settings.fontFamily);
     });
+    const wrap = fontPanel.querySelector('.font-custom');
+    if (wrap) wrap.classList.toggle('active', settings.fontFamily === CUSTOM_FONT_KEY);
+
+    const status = fontPanel.querySelector('.font-status');
+    if (status) {
+        const label = settings.fontFamily === CUSTOM_FONT_KEY
+            ? '自定义 · ' + (settings.customFontStack || '')
+            : (READER_FONTS[settings.fontFamily] || READER_FONTS[DEFAULT_FONT_KEY]).name;
+        status.textContent = '当前生效：' + label;
+    }
 }
 
-// 保存设置到本地存储
+// 保存设置到本地存储。
+// localStorage 只有约 5MB 且按 UTF-16 计费，书籍数据塞进去后很容易写满，
+// 导致设置（含阅读进度）静默丢失——所以这里必须容错，绝不把异常抛给调用方。
 function saveSettings() {
+    try {
         localStorage.setItem('lightreader-settings', JSON.stringify(settings));
+        return true;
+    } catch (e) {
+        console.warn('保存设置失败:', e.name, e.message);
+        // 先尝试瘦身：只保留当前书籍的阅读进度再写一次
+        try {
+            const keep = currentBookPath && settings.readingProgress[currentBookPath]
+                ? { [currentBookPath]: settings.readingProgress[currentBookPath] }
+                : {};
+            localStorage.setItem('lightreader-settings',
+                JSON.stringify(Object.assign({}, settings, { readingProgress: keep })));
+            console.warn('已精简阅读进度后保存成功（其他书籍的进度记录被丢弃）');
+            return true;
+        } catch (e2) {
+            console.error('设置仍无法保存，阅读进度本次不会持久化:', e2.name);
+            return false;
+        }
+    }
+}
+
+// ===== 书籍文件存储 =====
+// EPUB 二进制原先以 base64 分块塞进 localStorage：体积膨胀 33% 且按 UTF-16
+// 计配额，稍大一点的书必然写不下，表现为"刷新后书不见了"。
+// 改为优先存 IndexedDB（容量远大于 localStorage，且直接存二进制），
+// localStorage 分块只作为 IndexedDB 不可用时的回落。
+const BOOK_DB_NAME = 'lightreader-books';
+const BOOK_DB_STORE = 'files';
+
+function openBookDb() {
+    return new Promise((resolve, reject) => {
+        if (!('indexedDB' in window)) return reject(new Error('浏览器不支持 IndexedDB'));
+        let req;
+        try {
+            req = indexedDB.open(BOOK_DB_NAME, 1);
+        } catch (e) {
+            return reject(e);
+        }
+        req.onupgradeneeded = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains(BOOK_DB_STORE)) {
+                db.createObjectStore(BOOK_DB_STORE);
+            }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error || new Error('IndexedDB 打开失败'));
+        req.onblocked = () => reject(new Error('IndexedDB 被其他标签页阻塞'));
+    });
+}
+
+// 存储书籍二进制（ArrayBuffer）
+async function storeBookFile(bookId, arrayBuffer) {
+    const db = await openBookDb();
+    try {
+        await new Promise((resolve, reject) => {
+            const tx = db.transaction(BOOK_DB_STORE, 'readwrite');
+            tx.objectStore(BOOK_DB_STORE).put(arrayBuffer, bookId);
+            tx.oncomplete = resolve;
+            tx.onerror = () => reject(tx.error || new Error('写入 IndexedDB 失败'));
+            tx.onabort = () => reject(tx.error || new Error('写入 IndexedDB 被中止'));
+        });
+    } finally {
+        db.close();
+    }
+}
+
+// 读取书籍二进制，返回 ArrayBuffer，不存在则为 undefined
+async function getBookFile(bookId) {
+    const db = await openBookDb();
+    try {
+        return await new Promise((resolve, reject) => {
+            const tx = db.transaction(BOOK_DB_STORE, 'readonly');
+            const req = tx.objectStore(BOOK_DB_STORE).get(bookId);
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error || new Error('读取 IndexedDB 失败'));
+        });
+    } finally {
+        db.close();
+    }
+}
+
+// 回落方案：localStorage 分块（同步，返回块数量与实际存储字节数）
+function storeBookFileLegacy(bookId, arrayBuffer) {
+    const fileData = new Uint8Array(arrayBuffer);
+    const chunkSize = 1024 * 64;
+    const chunkCount = Math.ceil(fileData.length / chunkSize);
+    let stored = 0;
+    for (let i = 0; i < chunkCount; i++) {
+        const chunk = fileData.subarray(i * chunkSize, Math.min((i + 1) * chunkSize, fileData.length));
+        let binary = '';
+        for (let j = 0; j < chunk.length; j++) binary += String.fromCharCode(chunk[j]);
+        localStorage.setItem(`${bookId}_chunk_${i}`, btoa(binary));
+        stored += chunk.length;
+        if (stored >= fileData.length) break;
+    }
+    return { chunkCount, storedSize: stored };
+}
+
+// 回落方案：读取 localStorage 分块，任一块缺失返回 null
+function loadBookFileLegacy(bookId, chunkCount) {
+    let binary = '';
+    for (let i = 0; i < chunkCount; i++) {
+        const v = localStorage.getItem(`${bookId}_chunk_${i}`);
+        if (v === null) return null;
+        binary += atob(v);
+    }
+    const out = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) out[i] = binary.charCodeAt(i);
+    return out.buffer;
+}
+
+// 一次性迁移：把历史上存在 localStorage 的书籍分块搬进 IndexedDB，
+// 成功后删除 localStorage 分块，把被书籍占位挤满的配额还给设置存储。
+// 只有 IndexedDB 写入成功才删除，避免数据两头丢失。
+async function migrateLegacyBookChunks() {
+    if (!('indexedDB' in window)) return 0;
+    const groups = new Map();
+    for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        const m = key && key.match(/^(.+)_chunk_(\d+)$/);
+        if (!m) continue;
+        if (!groups.has(m[1])) groups.set(m[1], []);
+        groups.get(m[1]).push([parseInt(m[2], 10), key]);
+    }
+    if (groups.size === 0) return 0;
+
+    let moved = 0;
+    for (const [bookId, entries] of groups) {
+        entries.sort((a, b) => a[0] - b[0]);
+        try {
+            let binary = '';
+            for (const [, key] of entries) {
+                const v = localStorage.getItem(key);
+                if (v === null) throw new Error('缺少分块');
+                binary += atob(v);
+            }
+            const buf = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) buf[i] = binary.charCodeAt(i);
+            await storeBookFile(bookId, buf.buffer);
+            for (const [, key] of entries) localStorage.removeItem(key);
+            const progress = settings.readingProgress && settings.readingProgress[bookId];
+            if (progress && progress.fileInfo) {
+                progress.fileInfo.storage = 'indexeddb';
+                progress.fileInfo.chunks = 0;
+                delete progress.fileInfo.storedSize;
+            }
+            moved++;
+        } catch (e) {
+            console.warn('迁移旧书籍数据失败，保留原 localStorage 分块:', bookId, e.message);
+        }
+    }
+    if (moved > 0) saveSettings();
+    return moved;
 }
 
 // 保存阅读进度
@@ -543,95 +743,56 @@ async function handleEpubFile(file, existingBookPath = null) {
             // 因为提供existingBookPath意味着我们正在从已有的存储中恢复
             if (!existingBookPath) {
                 try {
-                    // 获取文件数据
-                    const fileData = new Uint8Array(arrayBuffer);
-                    
-                    // 将文件分成更小的块存储到localStorage
-                    const chunkSize = 1024 * 64; // 使用更小的块大小(64KB)，进一步降低失败风险
-                    const chunkCount = Math.ceil(fileData.length / chunkSize);
-                    
-                    // 清除之前可能存在的块
-                for (let i = 0; i < localStorage.length; i++) {
-                    const key = localStorage.key(i);
-                        if (key && key.startsWith(`${bookId}_chunk_`)) {
-                        localStorage.removeItem(key);
-                    }
-                }
-                
-                    console.log(`正在将EPUB文件分成${chunkCount}个块进行存储...`);
-                    
-                    // 存储新的块 - 使用Base64编码，更加高效和安全
-                    let totalStored = 0;
-                    let hasEncodingError = false;
-                    
-                    for (let i = 0; i < chunkCount; i++) {
-                        const start = i * chunkSize;
-                        const end = Math.min(start + chunkSize, fileData.length);
-                        const chunk = fileData.subarray(start, end);
-                        totalStored += (end - start);
-                        
-                        // 创建安全的 Base64 编码，避免非 Latin1 字符问题
-                        try {
-                            // 使用更安全的方法编码二进制数据
-                            // 使用 Uint8Array.from 创建视图并通过 Blob 编码
-                            const blob = new Blob([chunk]);
-                            const reader = new FileReader();
-                            
-                            // 使用同步方法，避免异步问题
-                            reader.onload = function(e) {
-                                try {
-                                    // 去除 "data:application/octet-stream;base64," 前缀
-                                    const base64Str = e.target.result.split(',')[1];
-                                    localStorage.setItem(`${bookId}_chunk_${i}`, base64Str);
-                                } catch (storageError) {
-                                    console.log('无法存储书籍数据，但阅读功能不受影响');
-                                }
-                            };
-                            
-                            reader.onerror = function() {
-                                hasEncodingError = true;
-                                console.log('编码数据块时出错，但不影响阅读');
-                            };
-                            
-                            // 同步读取
-                            reader.readAsDataURL(blob);
-                        } catch (e) {
-                            hasEncodingError = true;
-                            console.log(`块 ${i} 编码过程中出错，但不影响阅读`);
-                            // 错误不会传播到外部，不会显示错误弹窗
+                    // 优先写 IndexedDB；不可用时回落 localStorage 分块。
+                    // 注意：localStorage 分块对稍大的书必然写不下，刷新就恢复不了，
+                    // 所以这里必须如实记录 storage，让恢复阶段知道去哪里找数据。
+                    let fileInfo;
+                    try {
+                        await storeBookFile(bookId, arrayBuffer);
+                        fileInfo = {
+                            name: file.name,
+                            type: file.type || 'application/epub+zip',
+                            size: file.size,
+                            lastModified: file.lastModified,
+                            storage: 'indexeddb'
+                        };
+                        console.log('书籍已存入 IndexedDB:', (file.size / 1024 / 1024).toFixed(2), 'MB');
+                    } catch (idbError) {
+                        console.warn('IndexedDB 不可用，回落到 localStorage 分块:', idbError.message);
+                        // 清掉同名旧分块，避免新旧混杂
+                        for (let i = localStorage.length - 1; i >= 0; i--) {
+                            const key = localStorage.key(i);
+                            if (key && key.startsWith(`${bookId}_chunk_`)) localStorage.removeItem(key);
                         }
+                        const legacy = storeBookFileLegacy(bookId, arrayBuffer);
+                        fileInfo = {
+                            name: file.name,
+                            type: file.type || 'application/epub+zip',
+                            size: file.size,
+                            lastModified: file.lastModified,
+                            storage: 'localStorage',
+                            chunks: legacy.chunkCount,
+                            storedSize: legacy.storedSize
+                        };
                     }
-                    
-                    console.log(`成功存储书籍数据，共${chunkCount}个块，总大小: ${totalStored}/${fileData.length}字节`);
-                    
-                    if (hasEncodingError) {
-                        console.log('部分数据存储遇到编码问题，但不影响当前阅读');
-                    }
-                    
+
                     // 更新阅读进度中的文件信息
                     if (!settings.readingProgress[bookId]) {
                         settings.readingProgress[bookId] = {};
                     }
-                    
-                    // 保存文件信息用于后续恢复
-                    settings.readingProgress[bookId].fileInfo = {
-                    name: file.name,
-                        type: file.type || 'application/epub+zip',
-                        size: file.size,
-                        chunks: chunkCount,
-                        lastModified: file.lastModified,
-                        storedSize: totalStored // 记录实际存储的字节数
-                    };
-                    
+
+                    settings.readingProgress[bookId].fileInfo = fileInfo;
+
                     // 保存元数据
                     settings.readingProgress[bookId].metadata = {
                         title: bookTitle,
                         author: getAuthor(metadata) || '未知作者',
                         totalChapters: chapters.length
                     };
-            } catch (e) {
-                    console.log('存储数据时出现问题，但不影响当前阅读:', e.message);
-                    // 继续阅读，无需警告用户
+
+                    saveSettings();
+                } catch (e) {
+                    console.log('存储书籍数据时出现问题，本次阅读不受影响，但刷新后无法自动恢复:', e.message);
                 }
             }
             
@@ -1502,7 +1663,13 @@ function handleWindowResize() {
 function init() {
     // 加载设置
     loadSettings();
-    
+
+    // 把历史遗留的 localStorage 书籍分块迁到 IndexedDB，把被书籍占满的
+    // 配额还给设置存储（否则设置一直写不进去，表现为字体/进度记不住）
+    legacyMigration = migrateLegacyBookChunks()
+        .then(moved => { if (moved > 0) console.log(`已迁移 ${moved} 本书到 IndexedDB`); })
+        .catch(e => { console.warn('迁移书籍数据失败:', e.message); return 0; });
+
     // 添加事件监听器
     themeToggle.addEventListener('click', toggleTheme);
     fontIncrease.addEventListener('click', () => changeFontSize(1));
@@ -1701,8 +1868,10 @@ document.addEventListener('keydown', (e) => {
         viewer.classList.remove('hidden');
         dropArea.classList.add('hidden');
         
-        // 尝试恢复书籍
-        restoreBookFromId(bookFromHash).then(success => {
+        // 尝试恢复书籍（等迁移完成，否则可能读到还没搬进 IndexedDB 的旧数据）
+        (async () => {
+            if (legacyMigration) await legacyMigration;
+            restoreBookFromId(bookFromHash).then(success => {
             isRestoringBook = false;
             if (!success) {
                 console.log("从哈希恢复书籍失败");
@@ -1730,6 +1899,7 @@ document.addEventListener('keydown', (e) => {
                 resetUrlHash();
             }, 3000);
         });
+        })();
     }
     
     // 检查是否支持Service Worker
@@ -1871,67 +2041,38 @@ async function restoreBookFromId(bookId) {
     }
     
     try {
-        // 从localStorage中获取文件块
-        const chunks = [];
-        const chunkCount = progress.fileInfo.chunks || 0;
-        const expectedSize = progress.fileInfo.storedSize || progress.fileInfo.size || 0;
-        
-        if (chunkCount <= 0) {
-            console.error('块数量无效:', chunkCount);
-            return false;
+        // 优先从 IndexedDB 读取；读不到再试历史遗留的 localStorage 分块
+        let binaryData = null;
+        try {
+            const buf = await getBookFile(bookId);
+            if (buf) binaryData = new Uint8Array(buf);
+        } catch (e) {
+            console.warn('从 IndexedDB 读取书籍失败:', e.message);
         }
-        
-        console.log(`开始从localStorage恢复书籍，预期${chunkCount}个块，总大小约${expectedSize}字节`);
-        
-        // 先检查所有块是否存在
-        const missingChunks = [];
-            for (let i = 0; i < chunkCount; i++) {
-            const chunkKey = `${bookId}_chunk_${i}`;
-            if (!localStorage.getItem(chunkKey)) {
-                missingChunks.push(i);
+
+        if (!binaryData) {
+            const chunkCount = progress.fileInfo.chunks || 0;
+            if (chunkCount > 0) {
+                console.log(`IndexedDB 无数据，尝试 localStorage 分块（${chunkCount} 块）`);
+                const legacy = loadBookFileLegacy(bookId, chunkCount);
+                if (legacy) binaryData = new Uint8Array(legacy);
             }
         }
-        
-        if (missingChunks.length > 0) {
-            console.error(`缺少文件块: ${missingChunks.join(', ')}`);
+
+        if (!binaryData) {
+            console.error('找不到书籍文件数据：IndexedDB 与 localStorage 都没有完整数据');
             return false;
         }
-        
-        // 所有块都存在，开始恢复
-        let actualSize = 0;
-        for (let i = 0; i < chunkCount; i++) {
-            const chunkKey = `${bookId}_chunk_${i}`;
-            const chunk = localStorage.getItem(chunkKey);
-            
-            try {
-                // 将Base64编码的数据转换回二进制
-                const binaryChunk = atob(chunk);
-                actualSize += binaryChunk.length;
-                chunks.push(binaryChunk);
-            } catch (error) {
-                console.error(`解析文件块${i}数据失败:`, error);
-                return false;
-            }
+
+        const expectedSize = progress.fileInfo.size || progress.fileInfo.storedSize || 0;
+        console.log(`成功读取书籍数据，大小 ${binaryData.length} 字节（预期约 ${expectedSize} 字节）`);
+        if (expectedSize && Math.abs(binaryData.length - expectedSize) > 100) {
+            console.warn(`文件大小不匹配：预期约${expectedSize}字节，实际${binaryData.length}字节`);
         }
-        
-        // 将所有块合并为完整的文件数据
-        const fileContent = chunks.join('');
-        console.log(`成功读取所有文件块，总大小: ${fileContent.length}字节`);
-        
-        // 验证文件大小
-        if (Math.abs(fileContent.length - expectedSize) > 100) { // 允许100字节的误差
-            console.warn(`文件大小不匹配：预期约${expectedSize}字节，实际${fileContent.length}字节`);
-        }
-        
-        // 将字符串转换为二进制数据
-        const binaryData = new Uint8Array(fileContent.length);
-        for (let i = 0; i < fileContent.length; i++) {
-            binaryData[i] = fileContent.charCodeAt(i);
-        }
-        
+
         // 创建File对象
         const file = new File(
-            [new Blob([binaryData.buffer], {type: progress.fileInfo.type || 'application/epub+zip'})],
+            [new Blob([binaryData], {type: progress.fileInfo.type || 'application/epub+zip'})],
             progress.fileInfo.name || 'restored_book.epub',
             {
                 type: progress.fileInfo.type || 'application/epub+zip',

@@ -2,6 +2,45 @@
 
 按 `docs/MAINTENANCE_SOP.md` 执行，每次维护追加一条，只写事实与结论。
 
+## 2026-10-19 — 刷新后书籍消失（存储配额）+ 字体面板改二选一
+
+**现象**
+自定义字体粘贴后仍无变化；且刷新页面后书籍一起消失、回到初始上传界面。
+
+**根因：书籍二进制存在 localStorage，配额必然不够**
+EPUB 被转成 base64 分块写进 localStorage 的 `<bookId>_chunk_N`。问题是：
+
+- localStorage 配额约 5MB，且**按 UTF-16 字符计费**（1 个字符 ≈ 2 字节）；
+- base64 又让体积膨胀约 33%；
+- 两者叠加后，**约 1.9MB 以上的书就写不下**——而带图的 EPUB 普遍超过这个量级。
+
+后果是双重的：
+
+1. 分块写不全 → `restoreBookFromId()` 发现缺块 → 返回 false → 回到首页（"书籍消失"）；
+2. 配额被分块占满 → `saveSettings()` 抛 `QuotaExceededError`（原先无 try/catch，异常直接抛给调用方）→ **字体设置与阅读进度都写不进去**（"字体不生效/记不住"）。
+
+即便 `settings.readingProgress[bookId]` 存在，恢复也会因缺块失败——两个现象同一个源头。
+
+**修复**
+- 书籍二进制改存 **IndexedDB**（`lightreader-books` / `files` 库），直接存 `ArrayBuffer`，不转 base64，容量不再受限。localStorage 分块仅作 IndexedDB 不可用时的回落，`fileInfo.storage` 如实记录去向。
+- `restoreBookFromId()` 改为先查 IndexedDB，查不到再试历史 localStorage 分块。
+- 新增 `migrateLegacyBookChunks()`：启动时把历史遗留的 localStorage 分块搬进 IndexedDB，**只有 IndexedDB 写入成功才删除原分块**（避免两头丢失），把被占满的配额还给设置存储。
+- `saveSettings()` 加容错：绝不向外抛异常；配额不足时精简为只保留当前书籍进度再重试一次。
+- 恢复流程等迁移完成再执行，避免读到半迁移状态。
+
+**字体面板交互（用户反馈"二选一不明确"）**
+- 两项改为单选语义：每项前置圆点指示器，任何时候只有一项高亮。
+- 自定义区改为「使用本机字体（自定义）」按钮 + 输入框 + 「应用」/「清除」按钮；未填内容点按钮会聚焦输入框而不是静默无反应。
+- 面板底部新增状态行「当前生效：…」，切换后立即可见。
+- 不再自动关闭面板，方便看到选择结果。
+
+**验证**
+- 存储层从真实源码抽取，用 stub 的 localStorage / IndexedDB 跑 12 条用例全过：分块往返字节一致、缺块返回 null、IndexedDB 往返一致、迁移后数据完整且 localStorage 释放、**IndexedDB 不可用时分块必须保留**（防数据两头丢）。
+- 字体逻辑回归 8/8 通过。`node --check` 全过。
+- Service Worker 缓存版本 `v6` → `v7`。
+
+**未能验证**：沙箱无法访问 vercel.app（curl/WebFetch/Chrome CDP 均被拦截），浏览器端实际渲染与刷新恢复需人工确认。
+
 ## 2026-10-19 — 修复自定义字体输入后完全不生效
 
 **现象**

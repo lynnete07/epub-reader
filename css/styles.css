@@ -127,9 +127,13 @@ body {
     z-index: 200;
 }
 
+/* 二选一：每项前面带单选指示，任何时候只有一项高亮 */
 .font-panel .font-option {
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
     width: 100%;
+    box-sizing: border-box;
     padding: 0.55rem 0.8rem;
     background: transparent;
     color: var(--text-color);
@@ -138,6 +142,22 @@ body {
     font-size: 0.95rem;
     text-align: left;
     justify-content: flex-start;
+}
+
+.font-panel .font-option::before {
+    content: '';
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    box-sizing: border-box;
+    border: 1.5px solid var(--border-color);
+    border-radius: 50%;
+}
+
+.font-panel .font-option.active::before {
+    border-color: #ffffff;
+    background:
+        radial-gradient(circle at center, #ffffff 0 3.5px, transparent 3.5px);
 }
 
 .font-panel .font-option:hover {
@@ -161,6 +181,51 @@ body {
     font-weight: 500;
     color: var(--text-color);
     margin-bottom: 0.45rem;
+}
+
+.font-panel .font-option-custom {
+    font-size: 0.9rem;
+}
+
+.font-custom-actions {
+    display: flex;
+    gap: 0.4rem;
+    margin-top: 0.4rem;
+}
+
+.font-custom-actions button {
+    flex: 1;
+    justify-content: center;
+    padding: 0.35rem 0.5rem;
+    font-size: 0.82rem;
+    background-color: transparent;
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+}
+
+.font-custom-actions .font-apply {
+    background-color: var(--accent-color);
+    color: #ffffff;
+    border-color: var(--accent-color);
+}
+
+.font-custom-actions button:hover {
+    background-color: var(--feature-bg);
+}
+
+.font-custom-actions .font-apply:hover {
+    background-color: var(--accent-color);
+    opacity: 0.9;
+}
+
+.font-status {
+    padding: 0.5rem 0.8rem;
+    border-top: 1px solid var(--border-color);
+    font-size: 0.75rem;
+    color: var(--text-color);
+    opacity: 0.75;
+    word-break: break-all;
 }
 
 .font-custom-input {
