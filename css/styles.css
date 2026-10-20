@@ -113,84 +113,158 @@ body {
     position: relative;
 }
 
-/* 字体选择面板 */
+/* 字体选择面板：黑白灰，与站点中性配色一致 */
 .font-panel {
     position: absolute;
     top: calc(100% + 8px);
     right: 0;
-    width: 280px;
-    padding: 0.4rem;
+    width: 300px;
+    padding: 0.35rem;
     background-color: var(--content-bg);
     border: 1px solid var(--border-color);
-    border-radius: 8px;
-    box-shadow: 0 4px 16px var(--shadow-color);
+    border-radius: 6px;
+    box-shadow: 0 6px 20px var(--shadow-color);
     z-index: 200;
 }
 
-/* 二选一：每项前面带单选指示，任何时候只有一项高亮 */
+/* 默认字体项：前置圆点指示生效状态 */
 .font-panel .font-option {
     display: flex;
     align-items: center;
-    gap: 0.55rem;
+    gap: 0.6rem;
     width: 100%;
     box-sizing: border-box;
-    padding: 0.55rem 0.8rem;
+    padding: 0.6rem 0.75rem;
     background: transparent;
     color: var(--text-color);
     border: none;
-    border-radius: 6px;
-    font-size: 0.95rem;
+    border-radius: 4px;
+    font-size: 0.92rem;
+    font-weight: 400;
     text-align: left;
     justify-content: flex-start;
+    transition: background-color 0.2s, font-weight 0.2s;
 }
 
 .font-panel .font-option::before {
     content: '';
     flex: 0 0 auto;
-    width: 14px;
-    height: 14px;
+    width: 13px;
+    height: 13px;
     box-sizing: border-box;
-    border: 1.5px solid var(--border-color);
+    border: 1px solid var(--border-color);
     border-radius: 50%;
+    transition: border-color 0.2s, background-color 0.2s;
 }
 
-.font-panel .font-option.active::before {
-    border-color: #ffffff;
-    background:
-        radial-gradient(circle at center, #ffffff 0 3.5px, transparent 3.5px);
-}
-
-.font-panel .font-option:hover {
+.font-panel .font-option:hover,
+.font-panel .font-option:hover:active {
     background-color: var(--feature-bg);
+    transform: none; /* 抵消全局 button:hover 的位移 */
 }
 
 .font-panel .font-option.active {
-    background-color: var(--accent-color);
-    color: #ffffff;
-}
-
-/* 自定义字体输入区 */
-.font-custom {
-    padding: 0.6rem 0.8rem 0.4rem;
-    border-top: 1px solid var(--border-color);
-    margin-top: 0.4rem;
-}
-
-.font-custom-title {
-    font-size: 0.8rem;
     font-weight: 500;
-    color: var(--text-color);
-    margin-bottom: 0.45rem;
 }
 
-.font-panel .font-option-custom {
-    font-size: 0.9rem;
+.font-panel .font-option.active::before {
+    border-color: var(--text-color);
+    background: radial-gradient(circle at center, var(--text-color) 0 3px, transparent 3px);
+}
+
+/* 本机字体：开关 + 展开区 */
+.font-custom {
+    margin-top: 0.3rem;
+    padding-top: 0.4rem;
+    border-top: 1px solid var(--border-color);
+}
+
+.font-switch-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.4rem 0.75rem 0.45rem;
+}
+
+.font-switch-label {
+    font-size: 0.92rem;
+    color: var(--text-color);
+}
+
+.font-switch {
+    position: relative;
+    flex: 0 0 auto;
+    width: 34px;
+    height: 18px;
+    padding: 0;
+    border-radius: 9px;
+    background-color: var(--border-color);
+    transition: background-color 0.2s;
+}
+
+.font-switch:hover,
+.font-switch:hover:active {
+    background-color: var(--border-color);
+    transform: none; /* 抵消全局 button:hover */
+}
+
+.font-switch[aria-checked="true"] {
+    background-color: var(--button-color);
+}
+
+.font-switch-knob {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background-color: var(--content-bg);
+    transition: transform 0.2s;
+}
+
+/* 夜间模式下面板轨道也是深色，滑块需提亮才有对比 */
+.dark-mode .font-switch-knob {
+    background-color: var(--header-text);
+}
+
+.font-switch[aria-checked="true"] .font-switch-knob {
+    transform: translateX(16px);
+}
+
+/* 开关关闭时收起输入区 */
+.font-custom-body {
+    display: none;
+    padding: 0 0.75rem 0.3rem;
+}
+
+.font-custom.on .font-custom-body {
+    display: block;
+}
+
+.font-custom-input {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.45rem 0.55rem;
+    font-size: 0.85rem;
+    line-height: 1.4;
+    color: var(--text-color);
+    background-color: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    transition: border-color 0.2s;
+}
+
+.font-custom-input:focus {
+    outline: none;
+    border-color: var(--text-color);
 }
 
 .font-custom-actions {
     display: flex;
     gap: 0.4rem;
-    margin-top: 0.4rem;
+    margin-top: 0.45rem;
 }
 
 .font-custom-actions button {
@@ -201,60 +275,52 @@ body {
     background-color: transparent;
     color: var(--text-color);
     border: 1px solid var(--border-color);
-    border-radius: 6px;
+    border-radius: 4px;
+    transition: background-color 0.2s, opacity 0.2s;
+}
+
+.font-custom-actions button:hover,
+.font-custom-actions button:hover:active {
+    background-color: var(--feature-bg);
+    transform: none;
 }
 
 .font-custom-actions .font-apply {
-    background-color: var(--accent-color);
+    background-color: var(--button-color);
+    border-color: var(--button-color);
     color: #ffffff;
-    border-color: var(--accent-color);
-}
-
-.font-custom-actions button:hover {
-    background-color: var(--feature-bg);
 }
 
 .font-custom-actions .font-apply:hover {
-    background-color: var(--accent-color);
-    opacity: 0.9;
+    background-color: var(--primary-dark);
+}
+
+.font-custom-actions button:disabled {
+    background-color: transparent;
+    border-color: var(--border-color);
+    color: var(--text-color);
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: none;
 }
 
 .font-status {
-    padding: 0.5rem 0.8rem;
+    margin-top: 0.3rem;
+    padding: 0.5rem 0.75rem 0.35rem;
     border-top: 1px solid var(--border-color);
-    font-size: 0.75rem;
+    font-size: 0.72rem;
     color: var(--text-color);
-    opacity: 0.75;
+    opacity: 0.6;
+    line-height: 1.5;
     word-break: break-all;
-}
-
-.font-custom-input {
-    display: block;
-    width: 100%;
-    box-sizing: border-box;
-    padding: 0.45rem 0.6rem;
-    font-size: 0.88rem;
-    color: var(--text-color);
-    background-color: transparent;
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-}
-
-.font-custom-input:focus {
-    outline: none;
-    border-color: var(--accent-color);
-}
-
-.font-custom.active .font-custom-input {
-    border-color: var(--accent-color);
 }
 
 .font-hint {
     font-size: 0.72rem;
     color: var(--text-color);
-    opacity: 0.65;
-    line-height: 1.5;
-    margin: 0.45rem 0 0.2rem;
+    opacity: 0.6;
+    line-height: 1.65;
+    margin: 0.5rem 0 0.2rem;
     white-space: pre-line;
 }
 

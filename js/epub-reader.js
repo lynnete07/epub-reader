@@ -13,10 +13,10 @@ const overlay = document.getElementById('overlay');
 const fontButton = document.getElementById('font-button');
 const fontPanel = document.getElementById('font-panel');
 
-// 可选阅读字体。默认仅一项系统无衬线栈，其余交给「自定义」——用户填本机
-// 已安装的字体名（支持逗号分隔回退栈，如 "iA Writer Quattro S, 方正屏显雅宋简体"：
-// 拉丁字形用前者、中文自动回落后者）。不打包字体文件：商业字体再分发有授权问题，
-// 引用字体名完全合法，未安装的设备走回退栈，体验不降级。
+// 可选阅读字体。默认仅一项系统无衬线栈，其余交给「本机字体」——用户填本机
+// 已安装的字体名，可逗号分隔多个（靠前优先，缺字由后面的补）。
+// 不打包字体文件：商业字体再分发有授权问题，引用字体名完全合法，
+// 未安装的设备走回退栈，体验不降级。
 // lineHeight 与字体成套搭配；将来新增预置字体只需在此表加一项。
 const READER_FONTS = {
     sans: {
@@ -122,12 +122,13 @@ function applyFontFamily(key, rescaleProgress = true) {
     updateFontPanelActive();
 }
 
-// 构建字体选择面板：预置项以自身字体渲染名字做预览；自定义区支持
-// 输入本机已安装的字体名（逗号分隔多字体回退栈），输入框即时预览
+// 构建字体面板。结构为「默认字体 + 本机字体开关」：开关打开才展开输入框，
+// 填完点「启用」生效；关掉开关正文回到默认字体，但已输入的字体名保留在
+// settings.customFontStack 里，下次打开开关仍然在。
 function buildFontPanel() {
     fontPanel.innerHTML = '';
 
-    // 选项一：预置字体（与「自定义」互斥，二选一）
+    // 默认字体（与「本机字体」互斥，二选一）
     for (const [key, font] of Object.entries(READER_FONTS)) {
         const item = document.createElement('button');
         item.type = 'button';
@@ -136,86 +137,90 @@ function buildFontPanel() {
         item.style.fontFamily = font.stack;
         item.textContent = font.name;
         item.addEventListener('click', () => {
+            setToggle(false); // 关掉开关；已输入的内容不清空
             applyFontFamily(key);
             saveSettings();
         });
         fontPanel.appendChild(item);
     }
 
-    // 选项二：自定义本机字体
+    // 本机字体：开关 + 展开区
     const customWrap = document.createElement('div');
     customWrap.className = 'font-custom';
+
+    const switchRow = document.createElement('div');
+    switchRow.className = 'font-switch-row';
+    const switchLabel = document.createElement('span');
+    switchLabel.className = 'font-switch-label';
+    switchLabel.textContent = '本机字体';
+    const switchBtn = document.createElement('button');
+    switchBtn.type = 'button';
+    switchBtn.className = 'font-switch';
+    switchBtn.setAttribute('role', 'switch');
+    switchBtn.setAttribute('aria-checked', 'false');
+    switchBtn.setAttribute('aria-label', '使用本机字体');
+    const knob = document.createElement('span');
+    knob.className = 'font-switch-knob';
+    switchBtn.appendChild(knob);
+    switchRow.appendChild(switchLabel);
+    switchRow.appendChild(switchBtn);
+    customWrap.appendChild(switchRow);
+
+    const body = document.createElement('div');
+    body.className = 'font-custom-body';
 
     const input = document.createElement('input');
     input.type = 'text';
     input.className = 'font-custom-input';
-    input.placeholder = 'iA Writer Quattro S, 方正屏显雅宋简体';
     input.value = settings.customFontStack || '';
     input.spellcheck = false;
-
-    // 提交自定义栈：非空则切到自定义，空则回落到默认（保持二选一语义）
-    const commitCustom = () => {
-        settings.customFontStack = input.value.trim();
-        applyFontFamily(settings.customFontStack ? CUSTOM_FONT_KEY : DEFAULT_FONT_KEY);
-        saveSettings();
-    };
-
-    const customBtn = document.createElement('button');
-    customBtn.type = 'button';
-    customBtn.className = 'font-option font-option-custom';
-    customBtn.dataset.fontKey = CUSTOM_FONT_KEY;
-    customBtn.textContent = '使用本机字体（自定义）';
-    customBtn.addEventListener('click', () => {
-        // 还没填就先聚焦输入框，而不是静默什么都不做
-        if (!input.value.trim()) {
-            input.focus();
-            return;
-        }
-        commitCustom();
-    });
-    customWrap.appendChild(customBtn);
-    customWrap.appendChild(input);
+    input.autocomplete = 'off';
 
     const actions = document.createElement('div');
     actions.className = 'font-custom-actions';
-    const applyBtn = document.createElement('button');
-    applyBtn.type = 'button';
-    applyBtn.className = 'font-apply';
-    applyBtn.textContent = '应用';
-    applyBtn.addEventListener('click', commitCustom);
+
+    const enableBtn = document.createElement('button');
+    enableBtn.type = 'button';
+    enableBtn.className = 'font-apply';
+    enableBtn.textContent = '启用';
+    enableBtn.addEventListener('click', () => {
+        if (!input.value.trim()) {
+            input.focus(); // 空输入不静默无反应
+            return;
+        }
+        settings.customFontStack = input.value.trim();
+        applyFontFamily(CUSTOM_FONT_KEY);
+        saveSettings();
+    });
+
     const clearBtn = document.createElement('button');
     clearBtn.type = 'button';
     clearBtn.className = 'font-clear';
     clearBtn.textContent = '清除';
     clearBtn.addEventListener('click', () => {
+        // 只清空输入并回到默认字体；开关保持打开，方便接着填别的字体
         input.value = '';
         input.style.fontFamily = '';
         settings.customFontStack = '';
         applyFontFamily(DEFAULT_FONT_KEY);
         saveSettings();
+        refreshEnableState();
     });
-    actions.appendChild(applyBtn);
-    actions.appendChild(clearBtn);
-    customWrap.appendChild(actions);
 
-    // 输入即时预览（不落盘）
-    input.addEventListener('input', () => {
-        input.style.fontFamily = customStackToCss(input.value);
-    });
-    // 失焦或回车提交
-    input.addEventListener('change', commitCustom);
-    input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            commitCustom();
-        }
-    });
+    actions.appendChild(enableBtn);
+    actions.appendChild(clearBtn);
 
     const hint = document.createElement('p');
     hint.className = 'font-hint';
-    hint.textContent = '填本机已安装的字体名，逗号分隔、依次回退：前面的字体优先，缺字自动用后面的补。\n查字体名：macOS 打开「字体册」（Font Book）；Windows 设置 → 个性化 → 字体。\n多字体可按语言分工，如示例：英文用 Quattro S、中文回退雅宋。';
-    customWrap.appendChild(hint);
+    hint.textContent = '填写本机已安装的字体名，可填多个，用英文逗号分隔。\n'
+        + '靠前的优先使用：遇到它没有的字符（例如英文字体没有汉字），自动由后面的补上。\n'
+        + '想让中英文各用一款字体，把英文字体写在前面、中文字体写在后面。\n'
+        + '字体名需与系统中的名称完全一致，可在 macOS「字体册」或 Windows「设置 → 个性化 → 字体」中查看。';
 
+    body.appendChild(input);
+    body.appendChild(actions);
+    body.appendChild(hint);
+    customWrap.appendChild(body);
     fontPanel.appendChild(customWrap);
 
     // 状态行：明确告诉用户当前生效的是哪一项
@@ -223,22 +228,69 @@ function buildFontPanel() {
     status.className = 'font-status';
     fontPanel.appendChild(status);
 
+    function refreshEnableState() {
+        enableBtn.disabled = !input.value.trim();
+    }
+
+    function setToggle(on) {
+        customWrap.classList.toggle('on', on);
+        switchBtn.setAttribute('aria-checked', on ? 'true' : 'false');
+        if (on) {
+            refreshEnableState();
+            input.focus();
+        } else if (settings.fontFamily === CUSTOM_FONT_KEY) {
+            // 关掉开关：正文回到默认字体，已输入的字体名保留
+            applyFontFamily(DEFAULT_FONT_KEY);
+            saveSettings();
+        }
+    }
+
+    switchBtn.addEventListener('click', () => {
+        setToggle(switchBtn.getAttribute('aria-checked') !== 'true');
+    });
+
+    // 输入即时预览（不落盘）
+    input.addEventListener('input', () => {
+        input.style.fontFamily = customStackToCss(input.value);
+        refreshEnableState();
+    });
+    // 回车即启用
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            enableBtn.click();
+        }
+    });
+
+    // 初始状态：上次生效的是本机字体就把开关打开，已填内容随之显示
+    const startsOn = settings.fontFamily === CUSTOM_FONT_KEY;
+    customWrap.classList.toggle('on', startsOn);
+    switchBtn.setAttribute('aria-checked', startsOn ? 'true' : 'false');
+    if (settings.customFontStack) input.style.fontFamily = customStackToCss(settings.customFontStack);
+    refreshEnableState();
+
     updateFontPanelActive();
 }
 
-// 高亮当前选中的字体项（二选一，任何时候只有一项 active）
+// 标记当前生效项：默认字体与本机字体二选一，任何时候只有一项被标记
 function updateFontPanelActive() {
     if (!fontPanel) return;
     fontPanel.querySelectorAll('[data-font-key]').forEach(el => {
         el.classList.toggle('active', el.dataset.fontKey === settings.fontFamily);
     });
+
+    // 生效项为本机字体时开关必须打开（例如从存储恢复的场景）
     const wrap = fontPanel.querySelector('.font-custom');
-    if (wrap) wrap.classList.toggle('active', settings.fontFamily === CUSTOM_FONT_KEY);
+    const sw = fontPanel.querySelector('.font-switch');
+    if (wrap && sw && settings.fontFamily === CUSTOM_FONT_KEY) {
+        wrap.classList.add('on');
+        sw.setAttribute('aria-checked', 'true');
+    }
 
     const status = fontPanel.querySelector('.font-status');
     if (status) {
         const label = settings.fontFamily === CUSTOM_FONT_KEY
-            ? '自定义 · ' + (settings.customFontStack || '')
+            ? '本机字体 · ' + (settings.customFontStack || '')
             : (READER_FONTS[settings.fontFamily] || READER_FONTS[DEFAULT_FONT_KEY]).name;
         status.textContent = '当前生效：' + label;
     }

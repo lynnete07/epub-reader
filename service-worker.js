@@ -1,6 +1,6 @@
 // 缓存名称和版本
 // 任何静态资源或阅读逻辑变动后，递增版本号以触发客户端缓存更新
-const CACHE_NAME = 'lightreader-cache-v7';
+const CACHE_NAME = 'lightreader-cache-v8';
 
 // 需要缓存的静态资源
 // 注意：favicon 由 index.html 内的内联 data URI 提供，不要在这里预缓存 /favicon.ico
