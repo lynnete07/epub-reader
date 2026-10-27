@@ -38,6 +38,8 @@ LightReader 是部署在 Vercel 的纯静态 EPUB 阅读器。它让用户在浏
 | `DEPLOY.md` | 历史通用部署文档；其中 `dist/` 说明已过时，不能当作当前发布依据 |
 | `docs/MAINTENANCE_SOP.md` | 维护流程：每次改动、月度与季度巡检、应急回滚、可见性方案 |
 | `docs/MAINTENANCE_LOG.md` | 历次维护记录，追加写入 |
+| `docs/TESTING.md` | 当前测试边界、回归矩阵与发布前验收 |
+| `docs/HEALTH_AUDIT_2026-10-27.md` | 最近一次健康审计、证据与整改优先级 |
 
 ## 本地验证
 
@@ -45,6 +47,8 @@ LightReader 是部署在 Vercel 的纯静态 EPUB 阅读器。它让用户在浏
 
 ```bash
 npm run build
+npm test
+npm run test:browser
 node --check js/epub-reader.js
 node --check server.js
 node --check service-worker.js
@@ -68,8 +72,9 @@ npm start
 
 ## 当前已知风险
 
+- **EPUB 内容隔离是不可回退的安全边界。** `displayChapter()` 必须继续在不含 `allow-scripts` 的 sandbox iframe 中渲染章节，并保留 HTML / CSS / URL 净化和 iframe 内 CSP。不要把书籍正文重新写入应用 DOM，也不要为了兼容性放开脚本权限。每次改动阅读渲染都运行 `docs/TESTING.md` 的安全 fixture 回归。
 - **Vercel 后台的 Analytics 开关可能尚未开启。** 代码已就绪，但开关不开则访问数据为零；涉及"有没有人用"的判断前，先提醒用户在管理台确认。
-- `manifest.json` 声明的 `img/icon-192.png` 与 `img/icon-512.png` 不存在（`img/` 为空目录），PWA 安装图标会 404。要么补图标，要么删除这两条声明。
+- 浏览器回归依赖本机 Chrome；CI 使用 Playwright Chromium 前先执行 `npx playwright install chromium`。
 - 自定义事件 `epub_opened`、`chapter_viewed` 仅在 Vercel Pro / Enterprise 后台可见；Hobby 计划下不要承诺能在面板里看到它们。
 - CDN 依赖（JSZip 3.10.1、Font Awesome 6.4.0）长期未核对；改动 `index.html` 的依赖版本必须走完整验证流程。
 

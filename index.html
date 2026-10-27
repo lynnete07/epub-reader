@@ -7,9 +7,9 @@
     <meta name="keywords" content="EPUB, 电子书, 阅读器, 在线阅读, LightReader">
     <meta name="author" content="Yvonne">
     <meta name="theme-color" content="#333333">
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📖</text></svg>" type="image/svg+xml">
+    <link rel="icon" href="img/icon.svg" type="image/svg+xml">
     <link rel="manifest" href="manifest.json">
-    <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📖</text></svg>">
+    <link rel="apple-touch-icon" href="img/icon-192.png">
     <title>LightReader - 轻量级EPUB阅读器</title>
     <link rel="stylesheet" href="css/styles.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -32,15 +32,15 @@
             </div>
             <div class="settings">
                 <div class="settings-group">
-                    <button id="theme-toggle"><i class="fas fa-moon"></i></button>
-                    <button id="toc-button" disabled><i class="fas fa-list"></i></button>
-                    <button id="open-new-file" class="hidden"><i class="fas fa-book"></i></button>
+                    <button id="theme-toggle" type="button" aria-label="切换为深色主题" aria-pressed="false"><i class="fas fa-moon"></i></button>
+                    <button id="toc-button" type="button" aria-label="打开目录" aria-controls="toc-container" aria-expanded="false" disabled><i class="fas fa-list"></i></button>
+                    <button id="open-new-file" type="button" class="hidden" aria-label="在新窗口打开阅读器"><i class="fas fa-book"></i></button>
                     <div class="font-size-controls">
-                        <button id="font-decrease"><i class="fas fa-minus"></i></button>
-                        <button id="font-increase"><i class="fas fa-plus"></i></button>
+                        <button id="font-decrease" type="button" aria-label="减小字号"><i class="fas fa-minus"></i></button>
+                        <button id="font-increase" type="button" aria-label="增大字号"><i class="fas fa-plus"></i></button>
                     </div>
                     <div class="font-controls">
-                        <button id="font-button" title="阅读字体"><i class="fas fa-font"></i></button>
+                        <button id="font-button" type="button" aria-label="打开阅读字体设置" aria-controls="font-panel" aria-expanded="false"><i class="fas fa-font"></i></button>
                         <div id="font-panel" class="font-panel hidden"></div>
                     </div>
                 </div>
@@ -67,7 +67,7 @@
                         <p>将 EPUB 文件拖放到这里</p>
                         <p>— 或 —</p>
                         <input type="file" id="file-input" accept=".epub">
-                        <label for="file-input" class="file-input-label">选择文件</label>
+                        <label for="file-input" class="file-input-label" role="button" tabindex="0">选择文件</label>
                     </div>
                 </div>
             </div>
@@ -79,4 +79,4 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="js/epub-reader.js"></script>
 </body>
-</html> 
+</html>

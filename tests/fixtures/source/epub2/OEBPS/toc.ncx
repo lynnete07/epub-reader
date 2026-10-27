@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+  <navMap>
+    <navPoint id="chapter-1" playOrder="1"><navLabel><text>EPUB 2 第一章</text></navLabel><content src="chapter-1.xhtml"/></navPoint>
+    <navPoint id="chapter-2" playOrder="2"><navLabel><text>EPUB 2 第二章</text></navLabel><content src="chapter-2.xhtml"/></navPoint>
+  </navMap>
+</ncx>

@@ -1,14 +1,18 @@
 // 缓存名称和版本
 // 任何静态资源或阅读逻辑变动后，递增版本号以触发客户端缓存更新
-const CACHE_NAME = 'lightreader-cache-v8';
+const CACHE_NAME = 'lightreader-cache-v11';
 
 // 需要缓存的静态资源
-// 注意：favicon 由 index.html 内的内联 data URI 提供，不要在这里预缓存 /favicon.ico
+// 图标同时用于浏览器标签页与 PWA 安装界面，需随页面一起预缓存。
 const CACHE_ASSETS = [
     '/',
     '/index.html',
     '/css/styles.css',
     '/js/epub-reader.js',
+    '/manifest.json',
+    '/img/icon.svg',
+    '/img/icon-192.png',
+    '/img/icon-512.png',
     'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
     'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css',
     'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/webfonts/fa-solid-900.woff2'
@@ -95,4 +99,4 @@ self.addEventListener('fetch', event => {
                     });
             })
     );
-}); 
+});

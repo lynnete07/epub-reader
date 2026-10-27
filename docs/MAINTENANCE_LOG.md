@@ -2,6 +2,27 @@
 
 按 `docs/MAINTENANCE_SOP.md` 执行，每次维护追加一条，只写事实与结论。
 
+## 2026-10-27 — 全面健康审计与文档基线校正
+
+**结论**
+
+- 核心链路通过本地最小 EPUB 3 验证：导入、nav 目录、跨章链接、刷新恢复；390px 窄屏无横向溢出。
+- 发现发布阻断：章节 HTML / CSS 未隔离，恶意 EPUB 的 `onerror` 事件属性可在 LightReader 同源执行。修复前只可阅读信任来源的 EPUB。
+- 发现维护风险：导入事件重复注册、每次开书新增未回收的进度保存定时器、PWA PNG 图标缺失、图标按钮无可访问名称、无 lockfile / 自动化测试 / 真实 build gate。
+
+**文档改动**
+
+1. 新增 `docs/HEALTH_AUDIT_2026-10-27.md`：记录证据、健康度、整改优先级和本轮限制。
+2. 新增 `docs/TESTING.md`：明确现有验收、发布阻断安全回归和自动化目标。
+3. 校正 `docs/PROJECT_CONTEXT.md` 的存储架构与发布基线：书籍主存储为 IndexedDB，不再把旧 localStorage 分块描述成现状。
+4. `README.md` 增加信任来源提示，避免把“本地解析”误解为“可以安全打开任意 EPUB”。
+
+**验证**
+
+- `npm run build`、三个 `node --check` 均通过；注意 build 仍是占位命令。
+- `npm audit --omit=dev` 因仓库没有 lockfile 返回 `ENOLOCK`，已记录为整改项。
+- 本地 `npm start` 会让 `/_vercel/insights/script.js` 命中 SPA 回退并产生 `Unexpected token '<'`；这是本地开发服务器的已知缺陷。
+
 ## 2026-10-20 — 字体面板改为「默认 + 本机字体开关」，去掉示例字体名
 
 **背景**
@@ -185,3 +206,68 @@ if (!READER_FONTS[key]) key = DEFAULT_FONT_KEY;   // ← READER_FONTS 现在只�
 
 **未能验证**
 - 本次维护所在环境的网络无法直连 Vercel 与外网，线上部署结果需人工在浏览器确认。
+
+---
+
+## 2026-10-27 — EPUB 内容隔离整改
+
+**修复**
+
+- 章节正文不再写入应用的 `viewer.innerHTML`，改为无 `allow-scripts` 的 sandbox iframe 渲染。
+- 新增 HTML / CSS / URL 净化、iframe 内 CSP 和安全 DOM 目录构建；保留本地图片、字体、章节尺寸同步及书内跨章链接。
+- 错误提示改用 DOM API 写入，避免文件派生文本成为 HTML 注入点；Service Worker 缓存版本从 `v8` 升至 `v9`。
+
+**验证**
+
+- 使用自建恶意 EPUB 覆盖 `<script>`、事件属性、嵌入页、`javascript:` URL、外链 CSS 和外链样式 URL：应用标题未被篡改，恶意节点未进入章节，正文没有执行书内代码。
+- 同一样本的书内链接可跳转第二章，刷新后仍恢复第二章。
+- 本地 Console 仅保留已知的 `/_vercel/insights/script.js` SPA 回退错误；与 EPUB 隔离无关，单列为后续本地服务器修复项。
+
+---
+
+## 2026-10-27 — 导入重复与进度定时器整改
+
+**修复**
+
+- 拖放和文件选择监听器统一由 `initFileImportHandlers()` 在 `init()` 中注册一次。
+- `handleEpubFile()` 增加解析互斥：导入尚未结束时忽略第二个请求；文件选择值会立即清空，因此仍可重新选择同一个文件。
+- 30 秒进度保存改为唯一的 `progressSaveInterval`；换书、返回首页和页面卸载都会清理。Service Worker 缓存版本从 `v9` 升至 `v10`。
+
+**验证**
+
+- 本地导入自建 EPUB 样本后，控制台仅记录一次“处理书籍”，章节正常显示，未出现阅读器错误。
+
+---
+
+## 2026-10-27 — 可重复依赖与最小回归门
+
+**改动**
+
+- 新增 Node 14/npm 7 兼容的 `package-lock.json`（lockfile v2），并移除对它的 Git 忽略，以 `npm ci` 锁定 `http-server` 及其传递依赖。
+- 新增 `tests/regression-checks.js` 与 `npm test`：在不引入测试框架的前提下检查 JavaScript 语法、EPUB 无脚本隔离、净化入口、导入监听器单例、进度定时器单例、解析互斥和缓存版本。
+- `npm run build` 先运行 `npm test`，不再只是无验证的提示命令。
+- 新增 `npm run audit`，固定使用 npm 官方 registry；默认镜像不支持安全审计接口。
+
+**边界**
+
+- 这是一道快速静态质量门，不代替浏览器内的 EPUB 导入、刷新恢复、EPUB 2 NCX、移动端和恶意文件行为回归；这些仍按 `docs/TESTING.md` 执行。
+- `npm ci --ignore-scripts` 成功完成；`npm run audit` 返回 0 个已知漏洞。
+
+---
+
+## 2026-10-27 — 浏览器回归、PWA 与可访问性闭环
+
+**修复与补全**
+
+- 新增 Playwright 浏览器回归及提交到仓库的 EPUB 2、EPUB 3、恶意 EPUB fixture；本地使用已安装 Chrome，CI 可安装 Playwright Chromium。
+- 真实覆盖 EPUB 2 NCX、EPUB 3 nav、目录、跨章链接、刷新恢复、危险节点/URL 隔离、并发重复导入和键盘焦点。
+- 修复中文书名或文件名传入 `btoa()` 的异常：此前首次阅读看似成功，但无法存储书籍并在刷新后恢复；现以 UTF-8 字节生成稳定的本机书籍 ID。
+- 新增 192×192、512×512 maskable PNG 与 SVG 图标，入口页、manifest 与 Service Worker 保持一致；缓存版本 `v10` 升至 `v11`。
+- 本地 `server.js` 只为 HTML 导航执行 SPA 回退，缺失脚本/图片明确返回 404，消除 Analytics 脚本被当 HTML 解析的错误。
+- 图标按钮补齐可访问名称、展开/按下状态、状态公告与 `:focus-visible`；上传入口支持键盘触发。
+
+**验证**
+
+- `npm test` 通过。
+- `npm run test:browser` 通过，5/5（46.2 秒）。
+- `npm run audit` 返回 0 个已知漏洞。

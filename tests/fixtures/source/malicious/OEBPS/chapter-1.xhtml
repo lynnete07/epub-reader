@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head><link rel="stylesheet" href="https://example.invalid/evil.css"/><style>body { background: url(https://example.invalid/pixel); }</style></head>
+  <body onload="parent.document.title='PWNED'">
+    <script>parent.document.title = 'PWNED';</script>
+    <h1>恶意 EPUB 正文</h1>
+    <img src="x" onerror="parent.document.title='PWNED'"/>
+    <iframe src="https://example.invalid/evil"></iframe>
+    <object data="https://example.invalid/object"></object>
+    <embed src="https://example.invalid/embed"/>
+    <a href="javascript:parent.document.title='PWNED'">危险链接</a>
+  </body>
+</html>

@@ -346,6 +346,13 @@ button:active {
     transform: translateY(0);
 }
 
+button:focus-visible,
+.file-input-label:focus-visible,
+.font-custom-input:focus-visible {
+    outline: 3px solid var(--accent-color);
+    outline-offset: 3px;
+}
+
 button:disabled {
     background-color: var(--disabled-color);
     cursor: not-allowed;
@@ -522,6 +529,15 @@ button i {
     max-width: 800px;
     margin: 0 auto;
     padding: 0 1rem;
+}
+
+/* EPUB 正文运行在无脚本 sandbox iframe，边框与宿主阅读区融为一体。 */
+.chapter-frame {
+    display: block;
+    width: 100%;
+    min-height: 1px;
+    border: 0;
+    background: var(--content-bg);
 }
 
 /* 用户字体设置：仅作用于正文内容，不影响界面与目录。
@@ -902,4 +918,4 @@ button i {
     0% { background-position: 0% 50%; }
     50% { background-position: 100% 50%; }
     100% { background-position: 0% 50%; }
-} 
+}

@@ -5,7 +5,12 @@
   "main": "index.html",
   "scripts": {
     "start": "node server.js",
-    "build": "echo '构建静态资源完成'",
+    "test": "node tests/regression-checks.js",
+    "test:browser": "playwright test",
+    "test:all": "npm test && npm run test:browser",
+    "check": "npm run test",
+    "audit": "npm audit --audit-level=high --registry=https://registry.npmjs.org",
+    "build": "npm run check && echo '构建静态资源完成'",
     "clean": "echo '清理完成'",
     "copy-files": "echo '文件复制完成'",
     "minify-css": "echo 'CSS 压缩完成'",
@@ -21,9 +26,11 @@
   "author": "Yvonne",
   "license": "MIT",
   "engines": {
-    "node": ">=14.x"
+    "node": ">=18"
   },
   "devDependencies": {
-    "http-server": "^14.1.1"
+    "@playwright/test": "^1.55.1",
+    "http-server": "^14.1.1",
+    "jszip": "^3.10.1"
   }
-} 
+}

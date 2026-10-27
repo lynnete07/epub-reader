@@ -42,6 +42,9 @@ let scrollThrottleTime = 500; // 滚动切换章节的间隔时间（毫秒）
 let isRestoringBook = false; // 标记是否正在恢复书籍
 let objectUrls = []; // 本章为图片/字体等资源创建的 blob URL，切章时统一回收
 let legacyMigration = null; // 旧 localStorage 书籍分块 -> IndexedDB 的迁移 Promise
+let chapterFrame = null; // EPUB 正文只在受限 iframe 内渲染，绝不进入应用 DOM
+let progressSaveInterval = null; // 全应用只允许一个定期保存任务
+let isEpubImportInProgress = false; // 防止拖放和文件选择等重复操作并发解析同一本书
 
 // 应用设置
 const settings = {
@@ -60,12 +63,6 @@ function loadSettings() {
             const parsed = JSON.parse(savedSettings);
             Object.assign(settings, parsed);
             
-            // 应用主题
-            if (settings.theme === 'dark') {
-                document.body.classList.add('dark-mode');
-                themeToggle.innerHTML = '<i class="fas fa-sun"></i>';
-            }
-            
             // 应用字体大小
             document.documentElement.style.setProperty('--font-size-base', `${settings.fontSize}px`);
 
@@ -75,6 +72,17 @@ function loadSettings() {
             console.error('加载设置出错:', e);
         }
     }
+    updateThemeToggleControl();
+}
+
+function updateThemeToggleControl() {
+    const isDark = settings.theme === 'dark';
+    document.body.classList.toggle('dark-mode', isDark);
+    themeToggle.innerHTML = isDark
+        ? '<i class="fas fa-sun"></i>'
+        : '<i class="fas fa-moon"></i>';
+    themeToggle.setAttribute('aria-label', isDark ? '切换为浅色主题' : '切换为深色主题');
+    themeToggle.setAttribute('aria-pressed', String(isDark));
 }
 
 // 解析自定义字体栈：逗号分段、去空白、统一加引号（含空格/中文的字体名安全），
@@ -115,6 +123,7 @@ function applyFontFamily(key, rescaleProgress = true) {
     settings.fontFamily = key;
     viewer.style.setProperty('--reader-font-family', getFontStack(key));
     viewer.style.setProperty('--reader-line-height', String(lineHeight));
+    syncChapterFramePresentation();
 
     if (rescaleProgress && beforeHeight > 0 && viewer.scrollHeight > 0) {
         viewer.scrollTop = Math.round(beforeTop / beforeHeight * viewer.scrollHeight);
@@ -226,6 +235,8 @@ function buildFontPanel() {
     // 状态行：明确告诉用户当前生效的是哪一项
     const status = document.createElement('div');
     status.className = 'font-status';
+    status.setAttribute('role', 'status');
+    status.setAttribute('aria-live', 'polite');
     fontPanel.appendChild(status);
 
     function refreshEnableState() {
@@ -498,7 +509,11 @@ function generateFileId(file, title) {
     // 生成一个基于文件信息和标题的唯一ID
     const fileInfo = `${file.name}-${file.size}-${file.lastModified}`;
     const titleInfo = title ? `-${title}` : '';
-    return `book-${btoa(fileInfo + titleInfo).replace(/[+/=]/g, '')}`;
+    // btoa 只能编码 Latin-1。书名或文件名含中文时必须先转为 UTF-8 字节，
+    // 否则导入表面成功却不会存储，刷新后无法恢复。
+    const utf8Binary = encodeURIComponent(fileInfo + titleInfo)
+        .replace(/%([0-9A-F]{2})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+    return `book-${btoa(utf8Binary).replace(/[+/=]/g, '')}`;
 }
 
 // 匿名产品事件上报（Vercel Web Analytics）
@@ -572,17 +587,231 @@ function releaseObjectUrls() {
     objectUrls = [];
 }
 
+// ===== EPUB 内容隔离 =====
+// EPUB 是不可信输入。章节渲染采用三层边界：
+// 1. 移除可执行/嵌入元素和危险属性；2. CSS 只保留本地 blob/data 资源；
+// 3. 放入没有 allow-scripts 的 sandbox iframe，并以 CSP 阻止任何网络加载。
+// allow-same-origin 仅让父页面能处理目录、章节链接和高度；没有脚本权限时，
+// EPUB 内容仍不能读取父页面、localStorage 或 IndexedDB。
+const EPUB_BLOCKED_ELEMENTS = new Set([
+    'script', 'iframe', 'object', 'embed', 'applet', 'base', 'meta', 'link',
+    'style', 'form', 'input', 'button', 'textarea', 'select', 'option',
+    'video', 'audio', 'source', 'track'
+]);
+
+function sanitizeEpubCss(css) {
+    if (!css) return '';
+
+    return css
+        // @import 会绕过本地资源边界；旧浏览器的 expression / binding 也不保留。
+        .replace(/@import\s+(?:url\()?[^;{}]+;?/gi, '')
+        .replace(/@namespace\s+[^;{}]+;?/gi, '')
+        .replace(/(?:expression\s*\(|-moz-binding\s*:|behavior\s*:)/gi, '')
+        .replace(/url\(\s*([^)]*?)\s*\)/gi, (match, rawValue) => {
+            const value = rawValue.trim().replace(/^['"]|['"]$/g, '');
+            return /^(blob:|data:image\/|data:font\/|data:application\/font)/i.test(value)
+                ? `url("${value.replace(/"/g, '%22')}")`
+                : 'none';
+        })
+        // 不能让书籍 CSS 结束本身的 <style> 标签并注入新 HTML。
+        .replace(/<\/style/gi, '<\\/style');
+}
+
+function sanitizeEpubBody(htmlDoc) {
+    const body = htmlDoc.body || htmlDoc.createElement('body');
+
+    body.querySelectorAll(Array.from(EPUB_BLOCKED_ELEMENTS).join(',')).forEach(node => node.remove());
+
+    [body, ...body.querySelectorAll('*')].forEach(element => {
+        Array.from(element.attributes).forEach(attribute => {
+            const name = attribute.name.toLowerCase();
+            const value = attribute.value.trim();
+
+            if (name.startsWith('on') || name === 'srcdoc' || name === 'formaction' || name === 'target') {
+                element.removeAttribute(attribute.name);
+                return;
+            }
+
+            if (name === 'style') {
+                const safeStyle = sanitizeEpubCss(value);
+                if (safeStyle) element.setAttribute('style', safeStyle);
+                else element.removeAttribute('style');
+                return;
+            }
+
+            if (name === 'src' || name === 'poster') {
+                // 章节资源已在前面转换为 blob URL；其余 URL 一律不能触发请求。
+                if (!/^(blob:|data:image\/)/i.test(value)) element.removeAttribute(attribute.name);
+                return;
+            }
+
+            if (name === 'href' || name === 'xlink:href') {
+                // <a> 的相对路径和锚点交给父页面处理；其他元素只能引用本地资源。
+                if (element.tagName.toLowerCase() === 'a') {
+                    if (/^(?:javascript|vbscript|data):/i.test(value)) element.removeAttribute(attribute.name);
+                } else if (!/^(blob:|data:image\/)/i.test(value)) {
+                    element.removeAttribute(attribute.name);
+                }
+            }
+        });
+    });
+
+    return body.innerHTML;
+}
+
+function showViewerError(title, message, reloadable = false) {
+    chapterFrame = null;
+    viewer.replaceChildren();
+
+    const box = document.createElement('div');
+    box.className = 'error';
+    const heading = document.createElement('h3');
+    heading.textContent = title;
+    const detail = document.createElement('p');
+    detail.textContent = message || '请重新选择 EPUB 文件后再试。';
+    box.append(heading, detail);
+
+    if (reloadable) {
+        const actions = document.createElement('div');
+        actions.className = 'error-action';
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.textContent = '刷新页面';
+        button.addEventListener('click', () => location.reload());
+        actions.appendChild(button);
+        box.appendChild(actions);
+    }
+
+    viewer.appendChild(box);
+}
+
+function getChapterFrameStyles() {
+    const fontStack = getFontStack(settings.fontFamily).replace(/</g, '\\3C ');
+    return `
+        html { color-scheme: light; background: transparent; }
+        body {
+            box-sizing: border-box;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 0 1rem 2rem;
+            color: ${settings.theme === 'dark' ? '#e6e6e6' : '#333333'};
+            background: ${settings.theme === 'dark' ? '#1e1e1e' : '#ffffff'};
+            font-size: ${settings.fontSize}px;
+            line-height: ${settings.fontFamily === CUSTOM_FONT_KEY
+                ? READER_FONTS[DEFAULT_FONT_KEY].lineHeight
+                : (READER_FONTS[settings.fontFamily] || READER_FONTS[DEFAULT_FONT_KEY]).lineHeight};
+            overflow-wrap: break-word;
+        }
+        body, body *:not(pre):not(code):not(kbd):not(samp) {
+            font-family: ${fontStack} !important;
+        }
+        img, svg { max-width: 100%; height: auto; }
+        a { color: inherit; }
+    `;
+}
+
+function createChapterFrameDocument(bodyContent, cssContent) {
+    const safeCss = sanitizeEpubCss(cssContent);
+    return `<!doctype html>
+        <html lang="zh-CN"><head>
+        <meta charset="utf-8">
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src blob: data:; style-src 'unsafe-inline'; font-src blob: data:; media-src blob: data:; base-uri 'none'; form-action 'none'">
+        <style>${safeCss}</style><style id="lightreader-reader-style">${getChapterFrameStyles()}</style>
+        </head><body>${bodyContent}</body></html>`;
+}
+
+function resizeChapterFrame() {
+    if (!chapterFrame || !chapterFrame.contentDocument) return;
+    const doc = chapterFrame.contentDocument;
+    const height = Math.max(
+        doc.documentElement ? doc.documentElement.scrollHeight : 0,
+        doc.body ? doc.body.scrollHeight : 0
+    );
+    if (height > 0) chapterFrame.style.height = `${height + 1}px`;
+}
+
+function syncChapterFramePresentation() {
+    if (!chapterFrame || !chapterFrame.contentDocument) return;
+    const style = chapterFrame.contentDocument.getElementById('lightreader-reader-style');
+    if (style) style.textContent = getChapterFrameStyles();
+    requestAnimationFrame(resizeChapterFrame);
+}
+
+function isChapterFrameEvent(event) {
+    const target = event.target;
+    return Boolean(
+        target && target.closest && target.closest('.viewer') ||
+        chapterFrame && chapterFrame.contentDocument && target &&
+            target.ownerDocument === chapterFrame.contentDocument
+    );
+}
+
+function wireChapterFrameInteractions(frame, chapter) {
+    const frameDoc = frame.contentDocument;
+    if (!frameDoc) return;
+
+    frameDoc.querySelectorAll('a[href]').forEach(link => {
+        link.addEventListener('click', event => {
+            const href = link.getAttribute('href');
+            if (!href) return;
+            event.preventDefault();
+
+            try {
+                if (href.startsWith('#')) {
+                    const target = frameDoc.getElementById(decodeURIComponent(href.slice(1)));
+                    if (target) target.scrollIntoView({ behavior: 'smooth' });
+                    return;
+                }
+
+                if (/^https?:\/\//i.test(href)) {
+                    window.open(href, '_blank', 'noopener');
+                    return;
+                }
+
+                const linkPath = new URL(href, 'file:///' + chapter.href).pathname.substring(1);
+                const targetChapterIndex = chapters.findIndex(ch =>
+                    ch.href === linkPath || ch.href === linkPath.split('#')[0]
+                );
+                if (targetChapterIndex === -1) return;
+
+                currentChapter = targetChapterIndex;
+                fromTocNavigation = true;
+                viewer.style.opacity = '0';
+                viewer.style.transition = 'opacity 0.3s ease';
+                setTimeout(() => {
+                    displayChapter(currentChapter).then(() => {
+                        if (href.includes('#')) {
+                            const target = chapterFrame && chapterFrame.contentDocument &&
+                                chapterFrame.contentDocument.getElementById(decodeURIComponent(href.split('#')[1]));
+                            if (target) target.scrollIntoView({ behavior: 'smooth' });
+                        }
+                        viewer.style.opacity = '1';
+                        fromTocNavigation = false;
+                    });
+                }, 300);
+            } catch (error) {
+                console.warn('处理内部链接出错:', error);
+            }
+        });
+    });
+
+    frameDoc.addEventListener('wheel', handleWheelScroll, { passive: false });
+    frameDoc.addEventListener('touchstart', handleTouchStart, { passive: true });
+    frameDoc.addEventListener('touchmove', handleTouchMove, { passive: false });
+    frameDoc.addEventListener('keydown', handleReaderKeydown);
+    resizeChapterFrame();
+    requestAnimationFrame(resizeChapterFrame);
+}
+
 // 切换主题
 function toggleTheme() {
     if (settings.theme === 'light') {
         settings.theme = 'dark';
-        document.body.classList.add('dark-mode');
-        themeToggle.innerHTML = '<i class="fas fa-sun"></i>';
     } else {
         settings.theme = 'light';
-        document.body.classList.remove('dark-mode');
-        themeToggle.innerHTML = '<i class="fas fa-moon"></i>';
     }
+    updateThemeToggleControl();
+    syncChapterFramePresentation();
     saveSettings();
 }
 
@@ -590,6 +819,7 @@ function toggleTheme() {
 function changeFontSize(delta) {
     settings.fontSize = Math.max(12, Math.min(32, settings.fontSize + delta));
     document.documentElement.style.setProperty('--font-size-base', `${settings.fontSize}px`);
+    syncChapterFramePresentation();
     saveSettings();
 }
 
@@ -607,38 +837,75 @@ function openNewFile() {
     window.open(baseUrl, '_blank');
 }
 
-// 初始化拖放区域事件
-['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-    dropArea.addEventListener(eventName, preventDefaults, false);
-});
+function stopProgressAutoSave() {
+    if (progressSaveInterval !== null) {
+        clearInterval(progressSaveInterval);
+        progressSaveInterval = null;
+    }
+}
+
+function startProgressAutoSave() {
+    stopProgressAutoSave();
+    progressSaveInterval = setInterval(() => {
+        if (book && currentBookPath) {
+            saveReadingProgress();
+        } else {
+            stopProgressAutoSave();
+        }
+    }, 30000);
+}
+
+// 导入入口只在 init() 中绑定一次，避免同一文件被重复解析。
+function initFileImportHandlers() {
+    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+        dropArea.addEventListener(eventName, preventDefaults, false);
+    });
+
+    ['dragenter', 'dragover'].forEach(eventName => {
+        dropArea.addEventListener(eventName, () => {
+            dropArea.classList.add('drag-over');
+        }, false);
+    });
+
+    ['dragleave', 'drop'].forEach(eventName => {
+        dropArea.addEventListener(eventName, () => {
+            dropArea.classList.remove('drag-over');
+        }, false);
+    });
+
+    dropArea.addEventListener('drop', handleDrop, false);
+    fileInput.addEventListener('change', handleFileSelect, false);
+
+    const fileInputLabel = document.querySelector('label[for="file-input"]');
+    if (fileInputLabel) {
+        fileInputLabel.addEventListener('keydown', event => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                fileInput.click();
+            }
+        });
+    }
+}
 
 function preventDefaults(e) {
     e.preventDefault();
     e.stopPropagation();
 }
 
-['dragenter', 'dragover'].forEach(eventName => {
-    dropArea.addEventListener(eventName, () => {
-        dropArea.classList.add('drag-over');
-    }, false);
-});
-
-['dragleave', 'drop'].forEach(eventName => {
-    dropArea.addEventListener(eventName, () => {
-        dropArea.classList.remove('drag-over');
-    }, false);
-});
-
-dropArea.addEventListener('drop', handleDrop, false);
-fileInput.addEventListener('change', handleFileSelect, false);
+function isEpubFile(file) {
+    return Boolean(file) && (
+        file.type === 'application/epub+zip' ||
+        file.name.toLowerCase().endsWith('.epub')
+    );
+}
 
 // 处理拖放
 function handleDrop(e) {
     const dt = e.dataTransfer;
     const files = dt.files;
     
-    if (files.length && (files[0].type === 'application/epub+zip' || files[0].name.toLowerCase().endsWith('.epub'))) {
-        handleEpubFile(files[0]);
+    if (files.length && isEpubFile(files[0])) {
+        void handleEpubFile(files[0]);
     } else {
         alert('请上传有效的EPUB文件');
     }
@@ -648,8 +915,11 @@ function handleDrop(e) {
 function handleFileSelect(e) {
     const files = e.target.files;
     
-    if (files.length && (files[0].type === 'application/epub+zip' || files[0].name.toLowerCase().endsWith('.epub'))) {
-        handleEpubFile(files[0]);
+    if (files.length && isEpubFile(files[0])) {
+        const file = files[0];
+        // 清空选择值后，同一文件也可以再次选择；File 对象仍可供异步解析。
+        e.target.value = '';
+        void handleEpubFile(file);
     } else {
         alert('请上传有效的EPUB文件');
     }
@@ -672,6 +942,15 @@ function updateBookHash(bookId) {
 
 // 处理EPUB文件
 async function handleEpubFile(file, existingBookPath = null) {
+    if (isEpubImportInProgress) {
+        console.warn('已有 EPUB 正在解析，忽略重复导入请求');
+        return false;
+    }
+
+    isEpubImportInProgress = true;
+    if (book) saveReadingProgress();
+    stopProgressAutoSave();
+
     try {
         // 显示加载中的消息或动画
         viewer.innerHTML = '<div class="loading">加载中，请稍候...</div>';
@@ -895,14 +1174,8 @@ async function handleEpubFile(file, existingBookPath = null) {
             // 保存当前进度，同时会触发最近阅读列表更新
             saveReadingProgress();
             
-            // 定期保存阅读进度
-            const saveInterval = setInterval(() => {
-                if (book) {
-                    saveReadingProgress();
-                } else {
-                    clearInterval(saveInterval);
-                }
-            }, 30000); // 每30秒保存一次
+            // 只启动一个定期保存任务；换书前会由入口统一清理。
+            startProgressAutoSave();
             
             // 匿名上报：一本书被成功打开（不含书名等任何内容信息）
             trackEvent('epub_opened');
@@ -937,47 +1210,23 @@ async function handleEpubFile(file, existingBookPath = null) {
                 // 初始化布局
                 handleWindowResize();
 
+                startProgressAutoSave();
+
                 // 目录等次要步骤失败但正文可用，同样视为成功打开
                 trackEvent('epub_opened');
 
                 return true;
             }
             
-            // 如果章节内容未加载，则显示错误
-            viewer.innerHTML = `
-                <div class="error">
-                    <h3>解析EPUB文件出错</h3>
-                    <p>${epubParseError.message}</p>
-                    <div class="error-details">
-                        <p>可能的原因：</p>
-                        <ul>
-                            <li>EPUB文件已损坏或不完整</li>
-                            <li>不符合EPUB标准的文件格式</li>
-                            <li>文件过大，超出浏览器处理能力</li>
-                        </ul>
-                        <p>请尝试：</p>
-                        <ul>
-                            <li>使用其他EPUB文件测试</li>
-                            <li>重新下载或获取EPUB文件</li>
-                            <li>使用EPUBCheck等工具验证文件</li>
-                        </ul>
-                    </div>
-                </div>
-            `;
+            showViewerError('解析 EPUB 文件出错', epubParseError.message);
             return false;
         }
     } catch (error) {
         console.error('处理EPUB文件时出错:', error);
-        viewer.innerHTML = `
-            <div class="error">
-                <h3>处理EPUB文件时出错</h3>
-                <p>${error.message}</p>
-                <div class="error-action">
-                    <button onclick="location.reload()">刷新页面</button>
-                </div>
-            </div>
-        `;
+        showViewerError('处理 EPUB 文件时出错', error.message, true);
         return false;
+    } finally {
+        isEpubImportInProgress = false;
     }
 }
 
@@ -1259,85 +1508,30 @@ async function displayChapter(index) {
             }
         }
         
-        // 提取<body>内容
-        // 必须放在资源替换之后：bodyContent 是字符串快照，早取会丢掉上面的修改
-        const bodyContent = htmlDoc.body ? htmlDoc.body.innerHTML : content;
+        // 必须在资源替换后净化。这样正文只包含安全元素和本地 blob/data 资源。
+        const bodyContent = sanitizeEpubBody(htmlDoc);
         
         // 显示内容前先重置滚动位置（除非显式指定跳转到结尾）
         if (!fromTocNavigation || !window.jumpToEnd) {
             viewer.scrollTop = 0;
         }
         
-        // 显示内容
-        viewer.innerHTML = `
-            <style>${cssContent}</style>
-            <div class="chapter-content">${bodyContent}</div>
-        `;
-        
-        // 处理内部链接点击事件，防止无效链接导致页面刷新
-        const chapterLinks = viewer.querySelectorAll('a');
-        chapterLinks.forEach(link => {
-            link.addEventListener('click', (e) => {
-                const href = link.getAttribute('href');
-                
-                // 如果没有 href 属性或是外部链接（包含 http 或 https），则使用默认行为
-                if (!href || href.includes('http://') || href.includes('https://')) {
-                    return;
-                }
-                
-                // 阻止默认行为，防止页面刷新
-                e.preventDefault();
-                
-                // 尝试解析内部链接
-                try {
-                    // 如果是章节内部锚点，仅处理页面滚动
-                    if (href.startsWith('#')) {
-                        const targetElement = viewer.querySelector(href);
-                        if (targetElement) {
-                            targetElement.scrollIntoView({ behavior: 'smooth' });
-                        }
-                        return;
-                    }
-                    
-                    // 处理章节间链接
-                    const linkPath = new URL(href, 'file://' + chapter.href).pathname.substring(1);
-                    // 查找对应章节
-                    const targetChapterIndex = chapters.findIndex(ch => ch.href === linkPath || ch.href === linkPath.split('#')[0]);
-                    
-                    if (targetChapterIndex !== -1) {
-                        // 找到了对应章节，切换到该章节
-                        currentChapter = targetChapterIndex;
-                        fromTocNavigation = true;
-                        
-                        // 添加淡出效果
-                        viewer.style.opacity = '0';
-                        viewer.style.transition = 'opacity 0.3s ease';
-                        
-                        setTimeout(() => {
-                            displayChapter(currentChapter).then(() => {
-                                // 处理锚点
-                                setTimeout(() => {
-                                    if (href.includes('#')) {
-                                        const anchorId = href.split('#')[1];
-                                        const targetElement = viewer.querySelector(`#${anchorId}`);
-                                        if (targetElement) {
-                                            targetElement.scrollIntoView({ behavior: 'smooth' });
-                                        }
-                                    }
-                                    // 添加淡入效果
-                                    viewer.style.opacity = '1';
-                                    fromTocNavigation = false;
-                                }, 100);
-                            });
-                        }, 300);
-                    }
-                    // 如果找不到对应章节，不做任何操作，用户保持在当前页面
-                } catch (error) {
-                    console.warn('处理内部链接出错:', error);
-                    // 出错时不做任何跳转，保持用户在当前页面
-                }
-            });
+        // EPUB 内容不进入应用 DOM。无脚本 sandbox + iframe 内 CSP 共同阻断
+        // 同源脚本、事件属性、网络资源和 CSS 越界。
+        viewer.replaceChildren();
+        chapterFrame = document.createElement('iframe');
+        chapterFrame.className = 'chapter-frame';
+        chapterFrame.setAttribute('sandbox', 'allow-same-origin');
+        chapterFrame.setAttribute('referrerpolicy', 'no-referrer');
+        chapterFrame.setAttribute('title', getChapterTitle(index) || `第 ${index + 1} 章`);
+        chapterFrame.style.height = '1px';
+
+        await new Promise(resolve => {
+            chapterFrame.addEventListener('load', resolve, { once: true });
+            chapterFrame.srcdoc = createChapterFrameDocument(bodyContent, cssContent);
+            viewer.appendChild(chapterFrame);
         });
+        wireChapterFrameInteractions(chapterFrame, chapter);
         
         // 添加滚动监听，用于章节切换
         setupScrollChapterNavigation();
@@ -1351,13 +1545,11 @@ async function displayChapter(index) {
         // 保存阅读进度
         saveReadingProgress();
         
-        return new Promise((resolve) => {
-            resolve();
-        });
+        return Promise.resolve();
         
     } catch (error) {
         console.error('显示章节时出错:', error);
-        viewer.innerHTML = `<div class="error">加载章节时出错: ${error.message}</div>`;
+        showViewerError('加载章节时出错', error.message);
         return Promise.resolve();
     }
 }
@@ -1427,7 +1619,7 @@ function handleWheelScroll(e) {
     if (!book || isProcessingScroll) return;
     
     // 确保事件是在正文区域触发的，而不是浏览器滚动条
-    if (!e.target.closest('.viewer')) return;
+    if (!isChapterFrameEvent(e)) return;
     
     const now = Date.now();
     if (now - lastScrollTime < scrollThrottleTime) return;
@@ -1507,7 +1699,7 @@ const touchThreshold = 70; // 触摸阈值，需要多少距离才触发章节�
 function handleTouchStart(e) {
     if (!book) return;
     // 确保事件是在正文区域触发的
-    if (!e.target.closest('.viewer')) return;
+    if (!isChapterFrameEvent(e)) return;
     
     touchStartY = e.touches[0].clientY;
 }
@@ -1515,7 +1707,7 @@ function handleTouchStart(e) {
 function handleTouchMove(e) {
     if (!book || isProcessingScroll) return;
     // 确保事件是在正文区域触发的
-    if (!e.target.closest('.viewer')) return;
+    if (!isChapterFrameEvent(e)) return;
     
     const now = Date.now();
     if (now - lastScrollTime < scrollThrottleTime) return;
@@ -1593,24 +1785,31 @@ function renderToc(tocItems) {
         return;
     }
     
-    let html = '<ul>';
-    
+    tocContent.replaceChildren();
+    const list = document.createElement('ul');
+
     tocItems.forEach(item => {
-        const indentation = item.level * 20; // 根据级别缩进
+        const indentation = Math.max(0, Number(item.level) || 0) * 20;
         const chapterEmoji = getChapterEmoji(item.title);
-        
-        html += `
-            <li style="margin-left: ${indentation}px">
-                <a href="#" data-href="${item.href}" title="${item.title}">
-                    <span class="toc-emoji">${chapterEmoji}</span>
-                    <span class="toc-text">${item.title}</span>
-                </a>
-            </li>
-        `;
+
+        const listItem = document.createElement('li');
+        listItem.style.marginLeft = `${indentation}px`;
+        const link = document.createElement('a');
+        link.href = '#';
+        link.dataset.href = item.href;
+        link.title = item.title;
+        const emoji = document.createElement('span');
+        emoji.className = 'toc-emoji';
+        emoji.textContent = chapterEmoji;
+        const text = document.createElement('span');
+        text.className = 'toc-text';
+        text.textContent = item.title;
+        link.append(emoji, text);
+        listItem.appendChild(link);
+        list.appendChild(listItem);
     });
-    
-    html += '</ul>';
-    tocContent.innerHTML = html;
+
+    tocContent.appendChild(list);
     
     // 为目录项添加点击事件
     const tocLinks = tocContent.querySelectorAll('a');
@@ -1633,6 +1832,7 @@ function renderToc(tocItems) {
                     // 在移动设备上点击目录项后关闭目录
                     if (window.innerWidth < 768) {
                         tocContainer.classList.add('hidden');
+                        syncTocAccessibility();
                     }
                     
                     // 重置标记
@@ -1709,6 +1909,55 @@ function handleWindowResize() {
             tocContainer.style.transform = 'translateX(-100%)';
         }
     }
+    syncTocAccessibility();
+    resizeChapterFrame();
+}
+
+function syncTocAccessibility() {
+    tocButton.setAttribute('aria-expanded', String(!tocContainer.classList.contains('hidden')));
+}
+
+function setFontPanelOpen(open) {
+    fontPanel.classList.toggle('hidden', !open);
+    fontButton.setAttribute('aria-expanded', String(open));
+}
+
+// iframe 内的键盘事件不会冒泡到父页面，因此复用同一套章节与目录快捷键。
+function handleReaderKeydown(e) {
+    if (!book || e.repeat) return;
+
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (currentChapter > 0) {
+            fromTocNavigation = true;
+            currentChapter--;
+            displayChapter(currentChapter).then(() => {
+                viewer.scrollTop = 0;
+                fromTocNavigation = false;
+            });
+        }
+    } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (currentChapter < chapters.length - 1) {
+            fromTocNavigation = true;
+            currentChapter++;
+            displayChapter(currentChapter).then(() => {
+                viewer.scrollTop = 0;
+                fromTocNavigation = false;
+            });
+        }
+    }
+
+    if (e.key === 'Escape' && !tocContainer.classList.contains('hidden')) {
+        tocContainer.classList.add('hidden');
+        syncTocAccessibility();
+        overlay.classList.remove('active');
+        if (window.innerWidth >= 768) {
+            viewer.style.marginLeft = '0';
+        } else {
+            tocContainer.style.transform = 'translateX(-100%)';
+        }
+    }
 }
 
 // 初始化应用
@@ -1722,6 +1971,8 @@ function init() {
         .then(moved => { if (moved > 0) console.log(`已迁移 ${moved} 本书到 IndexedDB`); })
         .catch(e => { console.warn('迁移书籍数据失败:', e.message); return 0; });
 
+    initFileImportHandlers();
+
     // 添加事件监听器
     themeToggle.addEventListener('click', toggleTheme);
     fontIncrease.addEventListener('click', () => changeFontSize(1));
@@ -1731,24 +1982,25 @@ function init() {
     buildFontPanel();
     fontButton.addEventListener('click', (e) => {
         e.stopPropagation();
-        fontPanel.classList.toggle('hidden');
+        setFontPanelOpen(fontPanel.classList.contains('hidden'));
     });
     // 点击面板外任意处关闭面板
     document.addEventListener('click', (e) => {
         if (!fontPanel.classList.contains('hidden') && !fontPanel.contains(e.target) && e.target !== fontButton) {
-            fontPanel.classList.add('hidden');
+            setFontPanelOpen(false);
         }
     });
     // Esc 关闭面板
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape' && !fontPanel.classList.contains('hidden')) {
-            fontPanel.classList.add('hidden');
+            setFontPanelOpen(false);
         }
     });
     
     // 目录按钮点击事件处理 - 修复
-tocButton.addEventListener('click', () => {
+    tocButton.addEventListener('click', () => {
         const isTocHidden = tocContainer.classList.toggle('hidden');
+        syncTocAccessibility();
         
         // 切换遮罩层（只在移动设备上）
         if (window.innerWidth < 768) {
@@ -1773,6 +2025,7 @@ tocButton.addEventListener('click', () => {
     // 遮罩层点击事件 - 确保关闭目录
     overlay.addEventListener('click', () => {
         tocContainer.classList.add('hidden');
+        syncTocAccessibility();
         overlay.classList.remove('active');
         
         // 在移动设备上处理transform
@@ -1787,6 +2040,7 @@ tocButton.addEventListener('click', () => {
     document.addEventListener('keydown', e => {
         if (e.key === 't' && book) {
             const isTocHidden = tocContainer.classList.toggle('hidden');
+            syncTocAccessibility();
             
             // 切换遮罩层（只在移动设备上）
             if (window.innerWidth < 768) {
@@ -1811,6 +2065,7 @@ tocButton.addEventListener('click', () => {
 viewer.addEventListener('click', () => {
     if (window.innerWidth < 768 && !tocContainer.classList.contains('hidden')) {
         tocContainer.classList.add('hidden');
+        syncTocAccessibility();
         tocContainer.style.transform = 'translateX(-100%)';
         overlay.classList.remove('active');
     }
@@ -1856,6 +2111,7 @@ document.addEventListener('keydown', (e) => {
     // 按ESC键关闭目录
     if (e.key === 'Escape' && !tocContainer.classList.contains('hidden')) {
         tocContainer.classList.add('hidden');
+            syncTocAccessibility();
             overlay.classList.remove('active');
             if (window.innerWidth >= 768) {
                 viewer.style.marginLeft = '0';
@@ -1864,31 +2120,6 @@ document.addEventListener('keydown', (e) => {
             }
         }
     });
-    
-    // 添加拖放处理
-    const preventDefaults = e => {
-        e.preventDefault();
-        e.stopPropagation();
-    };
-    
-    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(event => {
-        dropArea.addEventListener(event, preventDefaults, false);
-    });
-    
-    ['dragenter', 'dragover'].forEach(event => {
-        dropArea.addEventListener(event, () => {
-            dropArea.classList.add('drag-over');
-        }, false);
-    });
-    
-    ['dragleave', 'drop'].forEach(event => {
-        dropArea.addEventListener(event, () => {
-            dropArea.classList.remove('drag-over');
-        }, false);
-    });
-    
-    dropArea.addEventListener('drop', handleDrop, false);
-    fileInput.addEventListener('change', handleFileSelect, false);
     
     // 监听窗口大小变化
     window.addEventListener('resize', handleWindowResize);
@@ -1939,8 +2170,7 @@ document.addEventListener('keydown', (e) => {
             console.error("恢复书籍出错:", err);
             isRestoringBook = false;
             
-            // 显示错误消息
-            viewer.innerHTML = `<div class="error">加载书籍失败: ${err.message}</div>`;
+            showViewerError('加载书籍失败', err.message);
             
             // 3秒后返回首页
             setTimeout(() => {
@@ -2026,13 +2256,7 @@ function handleHashChange() {
                 .catch(error => {
                     console.error('恢复书籍时发生错误:', error);
                     
-                    // 显示错误消息
-                    viewer.innerHTML = `
-                        <div class="error">
-                            <h3>加载书籍时出错</h3>
-                            <p>${error.message}</p>
-                        </div>
-                    `;
+                    showViewerError('加载书籍时出错', error.message);
                     
                     // 3秒后返回首页并重置哈希
                     setTimeout(() => {
@@ -2048,6 +2272,8 @@ function handleHashChange() {
     } else if (currentBookPath) {
         // 如果哈希被清空，但有当前书籍，则显示首页
         console.log('哈希已清空，返回首页');
+        saveReadingProgress();
+        stopProgressAutoSave();
         viewer.classList.add('hidden');
         dropArea.classList.remove('hidden');
         currentBookPath = '';
@@ -2170,15 +2396,7 @@ async function restoreBookFromId(bookId) {
                 }
             }).catch(error => {
                 console.error('处理EPUB文件时出错:', error);
-                viewer.innerHTML = `
-                    <div class="error">
-                        <h3>加载书籍失败</h3>
-                        <p>${error.message}</p>
-                        <div class="error-action">
-                            <button onclick="location.reload()">刷新页面</button>
-                        </div>
-                    </div>
-                `;
+                showViewerError('加载书籍失败', error.message, true);
                 reject(error);
             });
         });
@@ -2200,7 +2418,8 @@ window.addEventListener('beforeunload', () => {
     if (book) {
         saveReadingProgress();
     }
+    stopProgressAutoSave();
 });
 
 // 启动应用
-init(); 
+init();

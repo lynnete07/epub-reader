@@ -24,9 +24,8 @@ git switch -c feat/xxx    # 永远不要在 main 上直接改
 
 ```bash
 npm run build
-node --check js/epub-reader.js
-node --check server.js
-node --check service-worker.js
+npm test
+npm run test:browser
 npm start                 # 打开 http://localhost:3300
 ```
 
@@ -65,9 +64,8 @@ npm start                 # 打开 http://localhost:3300
 ## 3. 季度巡检（约 1 小时）
 
 1. **CDN 依赖**：`index.html` 里的 JSZip 3.10.1 与 Font Awesome 6.4.0。确认版本仍可用，考虑是否需要升级；升级后必须走一遍第 1 节全流程并递增 SW 缓存版本。
-2. **PWA 图标缺失（已知未修）**：`manifest.json` 声明了 `img/icon-192.png` 与 `img/icon-512.png`，但 `img/` 目录为空 → 图标 404，"添加到主屏幕"体验会降级。要么补两个 PNG，要么删掉这两条 icon 记录。
-3. **隐私回归**：DevTools → Network，打开一本书，检查所有出站请求，确认没有请求体携带书名、正文、文件内容或 localStorage 键值。
-4. **回滚演练**：Vercel → Deployments → 任选一个历史部署 → 熟悉"Promote to Production"在哪。别等线上出事再找按钮。
+2. **隐私回归**：DevTools → Network，打开一本书，检查所有出站请求，确认没有请求体携带书名、正文、文件内容或 localStorage 键值。
+3. **回滚演练**：Vercel → Deployments → 任选一个历史部署 → 熟悉"Promote to Production"在哪。别等线上出事再找按钮。
 
 ## 4. 线上故障应急
 
