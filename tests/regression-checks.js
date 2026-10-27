@@ -110,6 +110,10 @@ const expectedIcons = [
     ['img/icon-192.png', 192],
     ['img/icon-512.png', 512]
 ];
+const svgIcon = manifest.icons.find(item => item.src === 'img/icon.svg');
+assert(svgIcon, 'manifest 缺少首选 SVG 图标');
+assert.strictEqual(svgIcon.sizes, 'any');
+assert.strictEqual(svgIcon.type, 'image/svg+xml');
 expectedIcons.forEach(([src, size]) => {
     const icon = manifest.icons.find(item => item.src === src);
     assert(icon, `manifest 缺少 ${src}`);
