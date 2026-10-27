@@ -102,6 +102,7 @@ assert.strictEqual(
 assert(!gitignoreSource.split(/\r?\n/).includes('package-lock.json'), 'package-lock.json 不能被 Git 忽略');
 assert.strictEqual(packageJson.scripts['test:browser'], 'playwright test');
 assert(packageJson.devDependencies['@playwright/test'], '缺少浏览器回归依赖');
+assert.strictEqual(packageJson.engines.node, '>=20', 'CI 的 Node 版本必须与 Playwright 支持范围一致');
 assert(packageJson.devDependencies.jszip, '缺少离线浏览器回归所需的 JSZip');
 
 // PWA 图标是真实的 maskable PNG，并且入口页和 Service Worker 都能找到它们。
@@ -116,12 +117,16 @@ expectedIcons.forEach(([src, size]) => {
     assert.strictEqual(icon.type, 'image/png');
     assert(icon.purpose.includes('maskable'));
     assert.deepStrictEqual(readPngSize(src), { width: size, height: size });
-    assert(serviceWorkerSource.includes(`'/${src}'`), `Service Worker 未预缓存 ${src}`);
+    assert(serviceWorkerSource.includes(`appAsset('${src}')`), `Service Worker 未预缓存 ${src}`);
 });
 assert(indexSource.includes('href="img/icon.svg"'));
 assert(indexSource.includes('href="img/icon-192.png"'));
 assert(indexSource.includes('src="js/zip-safety.js"'));
-assert(serviceWorkerSource.includes("'/js/zip-safety.js'"));
+assert(!indexSource.includes('/_vercel/insights/script.js'), 'GitHub Pages 不应加载 Vercel Analytics 脚本');
+assert.strictEqual(manifest.start_url, './', 'PWA 必须从当前部署目录启动');
+assert(readerSource.includes("navigator.serviceWorker.register('service-worker.js')"));
+assert(serviceWorkerSource.includes("const APP_ROOT = new URL('./', self.registration.scope)"));
+assert(serviceWorkerSource.includes("appAsset('js/zip-safety.js')"));
 
 // PWA 仍需显式版本化，避免阅读逻辑更新后命中旧缓存。
 assert(/const CACHE_NAME = 'lightreader-cache-v\d+'/.test(serviceWorkerSource));

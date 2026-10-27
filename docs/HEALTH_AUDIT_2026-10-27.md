@@ -33,7 +33,7 @@ LightReader 的核心阅读链路可用，本轮整改已按边界闭环：浏�
 
 ## 高优先级整改
 
-1. **执行上线人工走查。** CI 绿灯和 Vercel Ready 后，按 [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md) 在无痕窗口完成固定 10 分钟检查。
+1. **执行上线人工走查。** CI 绿灯和 GitHub Pages 部署成功后，按 [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md) 在无痕窗口完成固定 10 分钟检查。
 2. **后续不纳入本阶段。** PWA 离线更新自动化、Worker 化的可抢占解析、主脚本拆分和复杂 EPUB 兼容性属于下一轮产品演进。
 
 ## 后续优化建议
@@ -47,5 +47,5 @@ LightReader 的核心阅读链路可用，本轮整改已按边界闭环：浏�
 ## 本轮限制
 
 - EPUB fixture 是最小结构样本；尚未替代带复杂排版、图片、字体和 DRM 的真实书籍兼容性测试。
-- 未访问 Vercel 管理台，因此部署绑定、Analytics 开关和生产 Service Worker 状态仍需在后台确认。
+- 2026-10-27 已由 GitHub 部署状态确认生产通道为 GitHub Pages；生产 Service Worker 状态仍需按上线清单人工确认。Vercel Analytics 仅在未来重新接入 Vercel 时适用。
 - 审计没有上传或读取任何私人电子书；所有功能和安全验证都使用本地生成的最小样本。

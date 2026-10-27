@@ -282,3 +282,8 @@ if (!READER_FONTS[key]) key = DEFAULT_FONT_KEY;   // ← READER_FONTS 现在只�
 - 新增 `tests/zip-safety.test.js`，覆盖正常目录与上述边界；`npm test` 现在同时执行静态与 ZIP 安全测试。
 - 新增 GitHub Actions 工作流：main 与 PR 都执行 `npm ci`、Playwright Chromium 安装、静态检查、浏览器回归和漏洞审计。
 - 新增 `docs/RELEASE_CHECKLIST.md`，把上线后的人工验证限制为固定 10 分钟清单。
+
+**发布校正（同日）**
+
+- 首次 CI 在当前 GitHub runner 安装旧版 Playwright 时失败；升级 `@playwright/test` 至 1.64.1，并将 Node 版本要求收紧为 20，避免依赖支持范围与 CI 不一致。
+- GitHub 部署状态确认实际生产通道为 GitHub Pages，地址为 `https://lynnete07.github.io/epub-reader/`；上线清单、项目上下文和 Agent 指南已从 Vercel 回滚语义校正为 GitHub Pages 部署与 Git 回退。

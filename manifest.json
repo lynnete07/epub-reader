@@ -2,7 +2,7 @@
   "name": "LightReader",
   "short_name": "LightReader",
   "description": "轻量级在线EPUB电子书阅读器",
-  "start_url": "/",
+  "start_url": "./",
   "display": "standalone",
   "background_color": "#f7f7f7",
   "theme_color": "#333333",
