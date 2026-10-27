@@ -8,6 +8,7 @@ const { spawnSync } = require('child_process');
 const projectRoot = path.resolve(__dirname, '..');
 const read = relativePath => fs.readFileSync(path.join(projectRoot, relativePath), 'utf8');
 const readerSource = read('js/epub-reader.js');
+const zipSafetySource = read('js/zip-safety.js');
 const serviceWorkerSource = read('service-worker.js');
 const serverSource = read('server.js');
 const indexSource = read('index.html');
@@ -63,6 +64,14 @@ assert(readerSource.includes('let isEpubImportInProgress = false'));
 assert(readerSource.includes('if (isEpubImportInProgress)'));
 assert(readerSource.includes('isEpubImportInProgress = false;'));
 assert(readerSource.includes('const utf8Binary = encodeURIComponent(fileInfo + titleInfo)'));
+assert(readerSource.includes('epubZipSafety.validateArchive(arrayBuffer)'));
+assert(readerSource.includes('epubZipSafety.withParseTimeout(JSZip.loadAsync(arrayBuffer'));
+assert(readerSource.includes('file.size > epubZipSafety.LIMITS.maxArchiveBytes'));
+assert(zipSafetySource.includes('maxArchiveBytes: 100 * 1024 * 1024'));
+assert(zipSafetySource.includes('maxEntries: 3000'));
+assert(zipSafetySource.includes('maxTotalUncompressedBytes: 250 * 1024 * 1024'));
+assert(zipSafetySource.includes('maxCompressionRatio: 100'));
+assert(zipSafetySource.includes('parseTimeoutMs: 15_000'));
 
 // 可访问性：图标按钮必须有名称、状态需要与实际展开状态联动，键盘焦点不可隐藏。
 ['theme-toggle', 'toc-button', 'open-new-file', 'font-decrease', 'font-increase', 'font-button'].forEach(id => {
@@ -111,6 +120,8 @@ expectedIcons.forEach(([src, size]) => {
 });
 assert(indexSource.includes('href="img/icon.svg"'));
 assert(indexSource.includes('href="img/icon-192.png"'));
+assert(indexSource.includes('src="js/zip-safety.js"'));
+assert(serviceWorkerSource.includes("'/js/zip-safety.js'"));
 
 // PWA 仍需显式版本化，避免阅读逻辑更新后命中旧缓存。
 assert(/const CACHE_NAME = 'lightreader-cache-v\d+'/.test(serviceWorkerSource));

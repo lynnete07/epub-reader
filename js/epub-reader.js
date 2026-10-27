@@ -45,6 +45,7 @@ let legacyMigration = null; // 旧 localStorage 书籍分块 -> IndexedDB 的迁
 let chapterFrame = null; // EPUB 正文只在受限 iframe 内渲染，绝不进入应用 DOM
 let progressSaveInterval = null; // 全应用只允许一个定期保存任务
 let isEpubImportInProgress = false; // 防止拖放和文件选择等重复操作并发解析同一本书
+const epubZipSafety = window.EpubZipSafety;
 
 // 应用设置
 const settings = {
@@ -952,6 +953,11 @@ async function handleEpubFile(file, existingBookPath = null) {
     stopProgressAutoSave();
 
     try {
+        // File API 已提供大小时先拒绝，避免为明显超限的压缩包分配完整 ArrayBuffer。
+        if (file.size > epubZipSafety.LIMITS.maxArchiveBytes) {
+            throw new Error(`EPUB 文件超过 ${(epubZipSafety.LIMITS.maxArchiveBytes / 1024 / 1024).toFixed(0)} MB 上限。`);
+        }
+
         // 显示加载中的消息或动画
         viewer.innerHTML = '<div class="loading">加载中，请稍候...</div>';
         viewer.classList.remove('hidden');
@@ -971,6 +977,8 @@ async function handleEpubFile(file, existingBookPath = null) {
             if (file.size !== arrayBuffer.byteLength) {
                 console.warn(`文件大小不匹配：预期 ${file.size}，实际 ${arrayBuffer.byteLength}`);
             }
+
+            epubZipSafety.validateArchive(arrayBuffer);
             
             console.log(`成功读取文件，大小：${arrayBuffer.byteLength} 字节`);
         } catch (error) {
@@ -982,9 +990,9 @@ async function handleEpubFile(file, existingBookPath = null) {
             // 使用JSZip解压EPUB - 添加错误处理
             let zip;
             try {
-                zip = await JSZip.loadAsync(arrayBuffer, {
+                zip = await epubZipSafety.withParseTimeout(JSZip.loadAsync(arrayBuffer, {
                     checkCRC32: true  // 启用CRC32校验以确保ZIP完整性
-                });
+                }));
             } catch (zipError) {
                 console.error('解压文件失败:', zipError);
                 // 尝试修复常见的ZIP文件问题

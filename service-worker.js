@@ -1,6 +1,6 @@
 // 缓存名称和版本
 // 任何静态资源或阅读逻辑变动后，递增版本号以触发客户端缓存更新
-const CACHE_NAME = 'lightreader-cache-v11';
+const CACHE_NAME = 'lightreader-cache-v12';
 
 // 需要缓存的静态资源
 // 图标同时用于浏览器标签页与 PWA 安装界面，需随页面一起预缓存。
@@ -8,6 +8,7 @@ const CACHE_ASSETS = [
     '/',
     '/index.html',
     '/css/styles.css',
+    '/js/zip-safety.js',
     '/js/epub-reader.js',
     '/manifest.json',
     '/img/icon.svg',

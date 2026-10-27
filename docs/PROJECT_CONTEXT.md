@@ -38,6 +38,7 @@ EPUB 内容从用户的文件选择器或拖拽操作进入浏览器，使用 JS
 | 设置与进度 | `loadSettings`、`saveSettings`、`saveReadingProgress` | 设置和进度存于 localStorage；修改键或数据结构需考虑旧数据兼容 |
 | 书籍存储 | `openBookDb`、`storeBookFile`、`getBookFile`、`migrateLegacyBookChunks` | EPUB 二进制优先存 IndexedDB；localStorage 分块仅为旧数据迁移和 IndexedDB 不可用时的回退 |
 | EPUB 导入 | `handleDrop`、`handleFileSelect`、`handleEpubFile` | 失败时应保留用户能重新选择文件的路径 |
+| ZIP 防护 | `js/zip-safety.js` | 在 JSZip 前限制归档大小、条目数、解压体积、压缩比与解析时间 |
 | EPUB 解析 | `getOpfPath`、`parseOpf`、`parseNcx`、`parseNav` | 同时处理 EPUB 2 NCX 与 EPUB 3 nav |
 | 阅读渲染 | `displayChapter`、`sanitizeEpubBody`、`createChapterFrameDocument`、`updateActiveTocItem` | 章节只能通过受限 iframe 渲染；避免让章节渲染破坏目录状态和进度 |
 | 手势与翻章 | `handleWheelScroll`、`handleTouchStart`、`handleTouchMove` | 需兼顾滚动阈值和移动端行为 |
@@ -53,6 +54,8 @@ Vercel 配置于 2025-04-14 的提交 `93d55c4` 加入，并由 `4140c7f` 修正
 `DEPLOY.md` 的 `dist/` 部署说明与实际配置不一致，保留它只能作历史参考。维护或部署决策应以 `vercel.json`、`package.json` 和 Vercel 管理台为准。
 
 `npm run build` 会先执行 `npm test`，再输出静态资源构建提示；它不生成打包产物。`npm test` 是无浏览器的快速质量门，`npm run test:browser` 则固定验证 EPUB 2/3、隔离、恢复、重复导入和基础无障碍。
+
+`.github/workflows/ci.yml` 会在 `main` 推送与 PR 上运行干净安装、静态回归、Playwright 浏览器回归和依赖审计。生产部署后按 [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md) 完成一次人工走查。
 
 ## 隐私与分析边界
 

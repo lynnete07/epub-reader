@@ -271,3 +271,14 @@ if (!READER_FONTS[key]) key = DEFAULT_FONT_KEY;   // ← READER_FONTS 现在只�
 - `npm test` 通过。
 - `npm run test:browser` 通过，5/5（46.2 秒）。
 - `npm run audit` 返回 0 个已知漏洞。
+
+---
+
+## 2026-10-27 — ZIP 资源防护与 CI 发布门
+
+**改动**
+
+- 新增 `js/zip-safety.js`：在交给 JSZip 前读取 ZIP 中央目录，限制压缩包大小、条目数、单条目体积、预计解压体积和压缩比；拒绝 ZIP64 / 多磁盘归档，并为目录解析设置 15 秒超时。
+- 新增 `tests/zip-safety.test.js`，覆盖正常目录与上述边界；`npm test` 现在同时执行静态与 ZIP 安全测试。
+- 新增 GitHub Actions 工作流：main 与 PR 都执行 `npm ci`、Playwright Chromium 安装、静态检查、浏览器回归和漏洞审计。
+- 新增 `docs/RELEASE_CHECKLIST.md`，把上线后的人工验证限制为固定 10 分钟清单。

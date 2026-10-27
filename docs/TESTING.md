@@ -15,7 +15,13 @@ npm run build
 npm start
 ```
 
-`npm test` 不启动浏览器，可在本地和 CI 中快速执行。`npm run test:browser` 在本机复用已安装的 Chrome；CI 应在它之前执行 `npx playwright install chromium`。`npm run audit` 固定使用 npm 官方 registry。`npm run build` 会先运行静态检查，但不替代浏览器回归。
+`npm test` 不启动浏览器，可在本地和 CI 中快速执行。`npm run test:browser` 在本机复用已安装的 Chrome。GitHub Actions 会在 `main` 推送和 PR 上使用 Node 20 与 Playwright Chromium 执行安装、两层回归和审计。`npm run audit` 固定使用 npm 官方 registry。`npm run build` 会先运行静态检查，但不替代浏览器回归。
+
+## EPUB 资源防护
+
+导入前 [`js/zip-safety.js`](../js/zip-safety.js) 会读取 ZIP 中央目录，拒绝超过 100 MB 的压缩包、超过 3,000 个条目、超过 50 MB 的单条目、预计解压超过 250 MB、压缩比高于 100:1 的条目以及 ZIP64 / 多磁盘归档。JSZip 的目录解析超过 15 秒也会向用户返回失败。
+
+这是客户端资源保护，不等同于对任意压缩算法提供可抢占的 CPU 中断；浏览器主线程被底层解压长期阻塞的问题需要 Worker 架构，已明确排除在本阶段范围之外。
 
 本地用 `npm start` 时，`/_vercel/insights/script.js` 会返回明确的 404，而不是 SPA HTML；因此不会再出现 `Unexpected token '<'`。Analytics 脚本本身的网络 404 在未运行 Vercel 环境时是预期行为。
 
@@ -37,8 +43,6 @@ npm start
 
 通过标准是：恶意 EPUB 既不能改变应用页面状态，也没有额外的网络请求或阅读器 Console 错误。iframe 因 CSP / sandbox 对书内恶意资源的拦截不应被视为阅读器错误。
 
-## 下一阶段自动化目标
+## 本阶段完成边界
 
-1. 建立 CI：至少运行 `npm ci`、静态回归、浏览器 fixture 回归、资产存在性检查、Service Worker 缓存清单检查和审计。
-2. 扩展安全 fixture：畸形 XML、超大 ZIP、ZIP 条目数与解压后体积上限。
-3. 补 PWA 离线更新、390px 移动抽屉和辅助技术的端到端回归。
+本阶段以 ZIP 资源防护和 CI 绿灯为终点。上线后只执行 [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md) 的人工走查，不再加入功能、模块拆分或兼容性扩展。
