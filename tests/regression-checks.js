@@ -106,11 +106,12 @@ assert.strictEqual(packageJson.engines.node, '>=20', 'CI 的 Node 版本必须�
 assert(packageJson.devDependencies.jszip, '缺少离线浏览器回归所需的 JSZip');
 
 // PWA 图标是真实的 maskable PNG，并且入口页和 Service Worker 都能找到它们。
+const iconRevision = '20261027';
 const expectedIcons = [
-    ['img/icon-192.png', 192],
-    ['img/icon-512.png', 512]
+    [`img/icon-192.png?v=${iconRevision}`, 192],
+    [`img/icon-512.png?v=${iconRevision}`, 512]
 ];
-const svgIcon = manifest.icons.find(item => item.src === 'img/icon.svg');
+const svgIcon = manifest.icons.find(item => item.src === `img/icon.svg?v=${iconRevision}`);
 assert(svgIcon, 'manifest 缺少首选 SVG 图标');
 assert.strictEqual(svgIcon.sizes, 'any');
 assert.strictEqual(svgIcon.type, 'image/svg+xml');
@@ -120,11 +121,11 @@ expectedIcons.forEach(([src, size]) => {
     assert.strictEqual(icon.sizes, `${size}x${size}`);
     assert.strictEqual(icon.type, 'image/png');
     assert(icon.purpose.includes('maskable'));
-    assert.deepStrictEqual(readPngSize(src), { width: size, height: size });
+    assert.deepStrictEqual(readPngSize(src.split('?')[0]), { width: size, height: size });
     assert(serviceWorkerSource.includes(`appAsset('${src}')`), `Service Worker 未预缓存 ${src}`);
 });
-assert(indexSource.includes('href="img/icon.svg"'));
-assert(indexSource.includes('href="img/icon-192.png"'));
+assert(indexSource.includes(`href="img/icon.svg?v=${iconRevision}"`));
+assert(indexSource.includes(`href="img/icon-192.png?v=${iconRevision}"`));
 assert(indexSource.includes('src="js/zip-safety.js"'));
 assert(indexSource.includes('/_vercel/insights/script.js'), 'Vercel 生产环境缺少 Analytics 脚本');
 assert.strictEqual(manifest.start_url, './', 'PWA 必须从当前部署目录启动');
@@ -133,7 +134,7 @@ assert(serviceWorkerSource.includes("const APP_ROOT = new URL('./', self.registr
 assert(serviceWorkerSource.includes("appAsset('js/zip-safety.js')"));
 
 // PWA 仍需显式版本化，避免阅读逻辑更新后命中旧缓存。
-assert(/const CACHE_NAME = 'lightreader-cache-v\d+'/.test(serviceWorkerSource));
+assert(serviceWorkerSource.includes("const CACHE_NAME = 'lightreader-cache-v14'"));
 
 // 浏览器测试必须使用提交到仓库的 fixture，确保本地与 CI 得到同一套输入。
 ['epub2-regression.epub', 'epub3-regression.epub', 'malicious-regression.epub'].forEach(filename => {

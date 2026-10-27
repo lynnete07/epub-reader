@@ -1,6 +1,6 @@
 // 缓存名称和版本
 // 任何静态资源或阅读逻辑变动后，递增版本号以触发客户端缓存更新
-const CACHE_NAME = 'lightreader-cache-v13';
+const CACHE_NAME = 'lightreader-cache-v14';
 const APP_ROOT = new URL('./', self.registration.scope);
 const appAsset = path => new URL(path, APP_ROOT).href;
 
@@ -13,9 +13,10 @@ const CACHE_ASSETS = [
     appAsset('js/zip-safety.js'),
     appAsset('js/epub-reader.js'),
     appAsset('manifest.json'),
-    appAsset('img/icon.svg'),
-    appAsset('img/icon-192.png'),
-    appAsset('img/icon-512.png'),
+    // 图标 URL 额外携带版本号，绕过浏览器对 favicon 和安装图标的独立缓存。
+    appAsset('img/icon.svg?v=20261027'),
+    appAsset('img/icon-192.png?v=20261027'),
+    appAsset('img/icon-512.png?v=20261027'),
     'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
     'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css',
     'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/webfonts/fa-solid-900.woff2'

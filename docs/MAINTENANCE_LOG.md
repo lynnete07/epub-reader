@@ -287,3 +287,16 @@ if (!READER_FONTS[key]) key = DEFAULT_FONT_KEY;   // ← READER_FONTS 现在只�
 
 - 首次 CI 在当前 GitHub runner 安装旧版 Playwright 时失败；升级 `@playwright/test` 至 1.64.1，并将 Node 版本要求收紧为 20，避免依赖支持范围与 CI 不一致。
 - GitHub Pages 曾随 `main` 自动发布，地址为 `https://lynnete07.github.io/epub-reader/`；后续确认 Vercel 才是用户指定的主生产环境，Pages 应关闭公开发布。上线清单、项目上下文和 Agent 指南恢复为 Vercel 部署与 Vercel 回滚语义。
+
+---
+
+## 2026-10-27 — 图标缓存与 iOS/PWA 图标同步
+
+**修复**
+
+- Service Worker 缓存版本从 `v13` 升至 `v14`，使已访问用户在下一次加载时安装新缓存并移除旧缓存。
+- SVG、192×192 PNG 和 512×512 PNG 使用同一版打开书本图标；入口页、Web App Manifest 与离线预缓存都指向带 `?v=20261027` 的图标地址，避免浏览器把旧 favicon 或安装图标当成有效资源。
+
+**验证**
+
+- 静态回归会检查三种图标的尺寸、版本地址和 Service Worker 预缓存项，避免后续只更新其中一种图标。
