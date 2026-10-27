@@ -14,7 +14,7 @@ LightReader 是一个由原生 HTML、CSS 和 JavaScript 构成的浏览器内 E
   ├─ localStorage：设置与阅读进度；旧版书籍分块仅作迁移和回退
   └─ service-worker.js：静态资源离线缓存
 
-GitHub Pages
+Vercel
   └─ 仅托管静态文件；没有业务后端
 ```
 
@@ -27,7 +27,7 @@ EPUB 内容从用户的文件选择器或拖拽操作进入浏览器，使用 JS
 - 原生 JavaScript，无框架和打包器。
 - `JSZip 3.10.1`：从 cdnjs 加载，用于读取 EPUB ZIP 内容。
 - Font Awesome 6.4.0：从 cdnjs 加载，用于图标。
-- Node.js：只用于本地 `server.js` 与 GitHub Actions 校验环境。
+- Node.js：只用于本地 `server.js`、GitHub Actions 校验与 Vercel 构建环境。
 
 部署产物就是仓库根目录内的静态文件，而不是 `dist/`；`npm run build` 不会产生新的打包产物。
 
@@ -47,11 +47,11 @@ EPUB 内容从用户的文件选择器或拖拽操作进入浏览器，使用 JS
 
 ## 当前发布模型
 
-`vercel.json` 保留了其他静态平台的构建与 SPA 回退配置；当前 GitHub Pages 发布不依赖它。
+`vercel.json` 的有效配置是：执行 `npm run build`、输出目录为 `.`，保留真实静态文件，其他路径回退到 `index.html`。
 
-`vercel.json` 于 2025-04-14 加入，并由 `4140c7f` 修正；它仍可作为其他静态平台的回退配置。2026-10-27 的 GitHub 部署状态明确显示 `main` 已自动发布到 GitHub Pages，生产地址为 `https://lynnete07.github.io/epub-reader/`。GitHub Actions 的 Pages 部署状态是当前生产发布与回滚依据。
+Vercel 配置于 2025-04-14 的提交 `93d55c4` 加入，并由 `4140c7f` 修正。2026-10-27 检测到 GitHub Pages 曾随 `main` 自动发布，但它只是仓库的次要公开入口；主生产地址为 `https://epub-reader-rust.vercel.app/`，Vercel 管理台是生产分支、部署状态、回滚和域名的权威来源。
 
-`DEPLOY.md` 的 `dist/` 部署说明与实际配置不一致，保留它只能作历史参考。维护或部署决策应以 GitHub Actions 部署状态、仓库根目录静态资源和 `package.json` 为准。
+`DEPLOY.md` 的 `dist/` 部署说明与实际配置不一致，保留它只能作历史参考。维护或部署决策应以 `vercel.json`、`package.json` 和 Vercel 管理台为准。
 
 `npm run build` 会先执行 `npm test`，再输出静态资源构建提示；它不生成打包产物。`npm test` 是无浏览器的快速质量门，`npm run test:browser` 则固定验证 EPUB 2/3、隔离、恢复、重复导入和基础无障碍。
 
@@ -61,10 +61,11 @@ EPUB 内容从用户的文件选择器或拖拽操作进入浏览器，使用 JS
 
 `sid` URL 参数已于 2026-10-19 移除：它每次加载随机生成、从未被读取或上报，不能作为用户或会话标识，用它统计会严重高估独立访客。
 
-统计现状（2026-10-27）：
+统计现状（2026-10-19 接入）：
 
-- 当前 GitHub Pages 版本没有加载第三方统计脚本，也不发送访问或阅读事件。
-- `js/epub-reader.js` 仍保留兼容性函数 `trackEvent()`；`window.va` 不存在时它静默跳过，不产生网络请求。
+- `index.html` 引入 Vercel Web Analytics：`<script defer src="/_vercel/insights/script.js"></script>`。无 cookie、无指纹。**必须在 Vercel 后台为该项目启用 Analytics 后才会真正发送数据。**
+- `js/epub-reader.js` 中的 `trackEvent()` 上报两个匿名事件：`epub_opened`（书籍成功打开）、`chapter_viewed`（章节成功渲染）。只含事件名。
+- 自定义事件仅在 Vercel Pro / Enterprise 计划的 Events 面板可见；Hobby 计划后台看不到，但代码无副作用。
 - 绝不发送 EPUB 文件、书名、作者、正文、阅读位置、localStorage 键值或书籍 ID。
 - 任何新增统计事件都必须更新本节，并在 `docs/MAINTENANCE_LOG.md` 记录数据采集范围的变化。
 
@@ -79,8 +80,8 @@ EPUB 内容从用户的文件选择器或拖拽操作进入浏览器，使用 JS
 ### 改动发布或分析
 
 1. 审查工作区已有改动，避免混入无关内容。
-2. 在分支环境或本地验证，并确认 `main` 的 Pages 部署成功。
-3. 上线后用无痕窗口验证首访加载；Network 中不应出现携带书籍内容的出站请求。
+2. 在 Vercel Preview 验证，并确认正式分支规则。
+3. 上线后用无痕窗口验证首访加载；统计启用后仅确认出现匿名页面浏览或允许的事件。
 4. 回归隐私边界：网络请求中不应含书籍内容或可识别阅读数据。
 
 ## 待维护问题
@@ -89,7 +90,8 @@ EPUB 内容从用户的文件选择器或拖拽操作进入浏览器，使用 JS
 
 仍然开放：
 
-1. CDN 依赖（JSZip 3.10.1、Font Awesome 6.4.0）长期未核对版本可用性。
-2. 若未来需要访问统计，必须作为独立的隐私与产品决策，不得默认恢复 Vercel Analytics。
+1. **Vercel 后台的 Analytics 开关可能尚未开启**——不开启则访问数据为零，需人工在管理台确认。
+2. 自定义事件在 Hobby 计划后台不可见。已决定保留代码、暂不升级套餐（2026-10-19）：`window.va` 不存在时 `trackEvent()` 静默跳过，零副作用；升级后可直接在 Events 面板看到，无需改代码。
+3. CDN 依赖（JSZip 3.10.1、Font Awesome 6.4.0）长期未核对版本可用性。
 
 维护流程见 [`docs/MAINTENANCE_SOP.md`](MAINTENANCE_SOP.md)，历次维护记录见 [`docs/MAINTENANCE_LOG.md`](MAINTENANCE_LOG.md)。

@@ -122,7 +122,7 @@ expectedIcons.forEach(([src, size]) => {
 assert(indexSource.includes('href="img/icon.svg"'));
 assert(indexSource.includes('href="img/icon-192.png"'));
 assert(indexSource.includes('src="js/zip-safety.js"'));
-assert(!indexSource.includes('/_vercel/insights/script.js'), 'GitHub Pages 不应加载 Vercel Analytics 脚本');
+assert(indexSource.includes('/_vercel/insights/script.js'), 'Vercel 生产环境缺少 Analytics 脚本');
 assert.strictEqual(manifest.start_url, './', 'PWA 必须从当前部署目录启动');
 assert(readerSource.includes("navigator.serviceWorker.register('service-worker.js')"));
 assert(serviceWorkerSource.includes("const APP_ROOT = new URL('./', self.registration.scope)"));

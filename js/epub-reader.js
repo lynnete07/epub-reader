@@ -517,8 +517,8 @@ function generateFileId(file, title) {
     return `book-${btoa(utf8Binary).replace(/[+/=]/g, '')}`;
 }
 
-// 兼容未来可选的匿名事件统计。
-// 当前 GitHub Pages 没有加载统计 SDK；若未来接入，仍不得携带书名、作者、正文、阅读位置、书籍 ID 或可识别信息。
+// 匿名产品事件上报（Vercel Web Analytics）。
+// 只上报事件名称，绝不携带书名、作者、正文、阅读位置、书籍 ID 或任何可识别信息。
 // 统计不可用时静默失败，任何情况下都不影响阅读。
 function trackEvent(name) {
     try {

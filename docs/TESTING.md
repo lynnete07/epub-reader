@@ -23,7 +23,7 @@ npm start
 
 这是客户端资源保护，不等同于对任意压缩算法提供可抢占的 CPU 中断；浏览器主线程被底层解压长期阻塞的问题需要 Worker 架构，已明确排除在本阶段范围之外。
 
-生产部署位于 GitHub Pages 的项目子路径。Service Worker、预缓存资源和 PWA `start_url` 都必须使用当前部署目录的相对路径；`npm test` 会检查这条约束，防止页面根路径下才可用的 PWA 回归。
+Service Worker、预缓存资源和 PWA `start_url` 使用当前部署目录的相对路径，因此 Vercel 根域部署与未来可能的项目子路径部署都能工作；`npm test` 会检查这条约束。
 
 ## 每次改动的最小回归
 

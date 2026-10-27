@@ -286,4 +286,4 @@ if (!READER_FONTS[key]) key = DEFAULT_FONT_KEY;   // ← READER_FONTS 现在只�
 **发布校正（同日）**
 
 - 首次 CI 在当前 GitHub runner 安装旧版 Playwright 时失败；升级 `@playwright/test` 至 1.64.1，并将 Node 版本要求收紧为 20，避免依赖支持范围与 CI 不一致。
-- GitHub 部署状态确认实际生产通道为 GitHub Pages，地址为 `https://lynnete07.github.io/epub-reader/`；上线清单、项目上下文和 Agent 指南已从 Vercel 回滚语义校正为 GitHub Pages 部署与 Git 回退。
+- GitHub Pages 曾随 `main` 自动发布，地址为 `https://lynnete07.github.io/epub-reader/`；后续确认 Vercel 才是用户指定的主生产环境，Pages 应关闭公开发布。上线清单、项目上下文和 Agent 指南恢复为 Vercel 部署与 Vercel 回滚语义。
